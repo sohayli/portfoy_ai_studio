@@ -1,0 +1,141 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - baseCurrency: string (enum: USD)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: portfolios
+    // Document ID: {portfolioId}
+    // Fields:
+    //   - id: string (required)
+    //   - ownerId: string (required, matches auth.uid)
+    //   - name: string (required, 1-100 chars)
+    //   - description: string (optional, 0-500 chars)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: portfolios/{portfolioId}/assets
+    // Document ID: {assetId}
+    // Fields:
+    //   - id: string (required)
+    //   - portfolioId: string (required)
+    //   - ownerId: string (required, matches auth.uid)
+    //   - symbol: string (required, 1-20 chars)
+    //   - name: string (optional)
+    //   - quantity: number (required, positive)
+    //   - purchasePrice: number (required, positive)
+    //   - purchaseCurrency: string (enum: USD)
+    //   - type: string (enum: Stock, Crypto, Commodity, Cash)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.ownerId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp;
+    }
+
+    function isRecent(ts) {
+      return ts is timestamp && 
+             ts <= request.time && 
+             ts >= request.time - duration.value(5, 'm');
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('baseCurrency' in data) || data.baseCurrency in ['USD']) &&
+             (!('createdAt' in data) || isValidTimestamp(data.createdAt));
+    }
+
+    function isValidPortfolio(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'createdAt']) &&
+             data.ownerId == request.auth.uid &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidAsset(data) {
+      return data.keys().hasAll(['portfolioId', 'ownerId', 'symbol', 'quantity', 'purchasePrice', 'purchaseCurrency', 'createdAt']) &&
+             data.ownerId == request.auth.uid &&
+             data.symbol is string && data.symbol.size() >= 1 && data.symbol.size() <= 20 &&
+             data.quantity is number && data.quantity > 0 &&
+             data.purchasePrice is number && data.purchasePrice >= 0 &&
+             data.purchaseCurrency in ['USD'] &&
+             (!('type' in data) || data.type in ['Stock', 'Crypto', 'Commodity', 'Cash']) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && isRecent(request.resource.data.createdAt);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    // Support for collectionGroup queries on 'assets'
+    match /{path=**}/assets/{assetId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidAsset(request.resource.data) && isRecent(request.resource.data.createdAt);
+      allow update: if isAuthenticated() && isDocOwner() && isValidAsset(request.resource.data) &&
+                    request.resource.data.ownerId == resource.data.ownerId &&
+                    request.resource.data.portfolioId == resource.data.portfolioId &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /portfolios/{portfolioId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidPortfolio(request.resource.data) && isRecent(request.resource.data.createdAt);
+      allow update: if isAuthenticated() && isDocOwner() && isValidPortfolio(request.resource.data) &&
+                    request.resource.data.ownerId == resource.data.ownerId &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "baseCurrency": { "type": "string", "enum": ["USD"], "description": "Preferred display currency" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Portfolio": {
+      "title": "Portfolio",
+      "description": "A collection of assets",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name"]
+    },
+    "Asset": {
+      "title": "Asset",
+      "description": "An individual holding within a portfolio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "portfolioId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "symbol": { "type": "string", "description": "Ticker symbol (e.g. AAPL, BTC, THYAO)" },
+        "name": { "type": "string" },
+        "quantity": { "type": "number" },
+        "purchasePrice": { "type": "number", "description": "Price at time of purchase" },
+        "purchaseCurrency": { "type": "string", "enum": ["USD"] },
+        "type": { "type": "string", "enum": ["Stock", "Crypto", "Commodity", "Cash"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["portfolioId", "ownerId", "symbol", "quantity", "purchasePrice", "purchaseCurrency"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User private data"
+    },
+    "/portfolios/{portfolioId}": {
+      "schema": "Portfolio",
+      "description": "Portfolio metadata"
+    },
+    "/portfolios/{portfolioId}/assets/{assetId}": {
+      "schema": "Asset",
+      "description": "Assets within a portfolio"
+    }
+  }
+}

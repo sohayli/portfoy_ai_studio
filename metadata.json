@@ -1,0 +1,5 @@
+{
+  "name": "FinTrack",
+  "description": "A multi-user portfolio tracking application with support for multiple sub-portfolios and real-time USD price tracking.",
+  "requestFramePermissions": []
+}
