@@ -794,36 +794,40 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
   }, [selectedPortfolioId, authContext?.user]);
 
   useEffect(() => {
-    if (assets.length === 0) return;
+    if (assets.length === 0 || !selectedPortfolioId) return;
 
-    const interval = setInterval(async () => {
-      const updatedAssets = await Promise.all(assets.map(async (asset) => {
-        let currentPrice = asset.currentPrice;
-        
+    const fetchAllPrices = async () => {
+      // Process assets in sequence to avoid rate limits and provide steady updates
+      for (const asset of assets) {
         try {
+          let price = null;
           if (asset.type === 'Stock') {
             const result = await fetchStockPrice(asset.symbol);
-            if (result) currentPrice = result.price;
+            if (result) price = result.price;
           } else if (asset.type === 'Crypto') {
-            currentPrice = await fetchCryptoPrice(asset.symbol);
+            price = await fetchCryptoPrice(asset.symbol);
           } else if (asset.type === 'Fund') {
-            currentPrice = await fetchTefasPrice(asset.symbol, asset.tefasType);
+            price = await fetchTefasPrice(asset.symbol, asset.tefasType);
+          }
+
+          // Only update if price is valid and different
+          if (price !== null && price !== asset.currentPrice) {
+            const assetRef = doc(db, `portfolios/${asset.portfolioId}/assets`, asset.id);
+            await setDoc(assetRef, { currentPrice: price }, { merge: true });
           }
         } catch (e) {
           console.error(`Error updating price for ${asset.symbol}:`, e);
         }
-
-        return { ...asset, currentPrice };
-      }));
-
-      const hasChanged = JSON.stringify(updatedAssets) !== JSON.stringify(assets);
-      if (hasChanged) {
-        setAssets(updatedAssets);
       }
-    }, 60000);
+    };
 
+    // Initial fetch
+    fetchAllPrices();
+
+    // Set up interval for subsequent fetches
+    const interval = setInterval(fetchAllPrices, 60000);
     return () => clearInterval(interval);
-  }, [assets]);
+  }, [selectedPortfolioId, assets.length]); // Only re-run if portfolio changes or asset count changes
 
   const handleAddPortfolio = async (name: string, description: string, monthlyGoal: number) => {
     if (!authContext?.user) return;
@@ -846,8 +850,25 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
     if (!selectedPortfolioId || !authContext?.user) return;
     try {
       const newDocRef = doc(collection(db, `portfolios/${selectedPortfolioId}/assets`));
+      
+      // Fetch initial price immediately
+      let initialPrice = undefined;
+      try {
+        if (assetData.type === 'Stock') {
+          const res = await fetchStockPrice(assetData.symbol);
+          if (res) initialPrice = res.price;
+        } else if (assetData.type === 'Crypto') {
+          initialPrice = await fetchCryptoPrice(assetData.symbol);
+        } else if (assetData.type === 'Fund') {
+          initialPrice = await fetchTefasPrice(assetData.symbol, assetData.tefasType);
+        }
+      } catch (e) {
+        console.error("Initial price fetch failed:", e);
+      }
+
       await setDoc(newDocRef, {
         ...assetData,
+        currentPrice: initialPrice,
         id: newDocRef.id,
         portfolioId: selectedPortfolioId,
         ownerId: authContext.user.uid,
