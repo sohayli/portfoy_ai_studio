@@ -87,7 +87,7 @@ const fetchTefasPrice = async (symbol: string, type?: string): Promise<number | 
 
 // --- Components ---
 
-function Treemap({ data }: { data: { name: string; value: number; color: string }[] }) {
+function Treemap({ data }: { data: { name: string; value: number; color: string; percentage: number }[] }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -119,9 +119,9 @@ function Treemap({ data }: { data: { name: string; value: number; color: string 
       .attr("height", (d: any) => d.y1 - d.y0)
       .attr("fill", (d: any) => d.data.color)
       .attr("rx", 4)
-      .attr("opacity", 0.8)
+      .attr("opacity", 0.9)
       .on("mouseenter", function() { d3.select(this).attr("opacity", 1); })
-      .on("mouseleave", function() { d3.select(this).attr("opacity", 0.8); });
+      .on("mouseleave", function() { d3.select(this).attr("opacity", 0.9); });
 
     leaf.append("text")
       .attr("x", 5)
@@ -136,8 +136,22 @@ function Treemap({ data }: { data: { name: string; value: number; color: string 
       .attr("y", 30)
       .attr("fill", "white")
       .attr("font-size", "10px")
-      .attr("opacity", 0.8)
+      .attr("opacity", 0.9)
       .text((d: any) => (d.x1 - d.x0 > 60 && d.y1 - d.y0 > 40) ? formatCurrency((d.data as any).value) : "");
+
+    leaf.append("text")
+      .attr("x", 5)
+      .attr("y", 45)
+      .attr("fill", "white")
+      .attr("font-size", "10px")
+      .attr("font-weight", "bold")
+      .text((d: any) => {
+        if (d.x1 - d.x0 > 60 && d.y1 - d.y0 > 55) {
+          const p = (d.data as any).percentage;
+          return `${p >= 0 ? '+' : ''}${p.toFixed(2)}%`;
+        }
+        return "";
+      });
 
   }, [data]);
 
@@ -205,6 +219,7 @@ function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClos
             else if (category.includes('cash')) type = 'Cash';
 
             const purchasePrice = shares > 0 ? costBasis / shares : 0;
+            const dividendYield = parseFloat(getVal(['Dividend Yield', 'Yield', 'Temettü', 'Verim']).replace(/%/g, '').replace(/,/g, '')) / 100 || 0;
 
             return {
               symbol: symbol || 'UNKNOWN',
@@ -212,7 +227,8 @@ function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClos
               quantity: shares,
               purchasePrice: purchasePrice,
               purchaseCurrency: 'USD' as const,
-              type: type
+              type: type,
+              dividendYield: dividendYield > 0 ? dividendYield : undefined
             };
           }).filter(asset => asset.quantity > 0);
 
@@ -251,7 +267,7 @@ function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClos
         </div>
 
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-          Upload a CSV file containing your holdings. We'll automatically map Symbol, Name, Shares, and Cost Basis.
+          Upload a CSV file containing your holdings. We'll automatically map Symbol, Name, Shares, Cost Basis, and Dividend Yield.
         </p>
 
         <div className="space-y-4">
@@ -667,7 +683,10 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
 
           {(type === 'Stock' || type === 'Fund') && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Annual Dividend Yield (%)</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Annual Dividend Yield (%)</label>
+                <span className="text-[10px] text-slate-400 italic">Manual entry</span>
+              </div>
               <input 
                 type="number" 
                 value={dividendYield}
@@ -912,18 +931,27 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
   );
 
   const treemapData = assets.map(asset => {
-    const colors = {
-      'Stock': '#4f46e5', // Indigo
-      'Crypto': '#f59e0b', // Amber
-      'Commodity': '#10b981', // Emerald
-      'Fund': '#9333ea', // Purple
-      'Cash': '#64748b' // Slate
-    };
+    const currentValue = (asset.currentPrice || asset.purchasePrice) * asset.quantity;
+    const gainLossPercent = asset.currentPrice ? ((asset.currentPrice - asset.purchasePrice) / asset.purchasePrice) * 100 : 0;
+
+    // Color scale for gain/loss
+    // Green shades for gain, Red shades for loss
+    let color = '#64748b'; // Default slate
+    if (gainLossPercent > 0) {
+      // Scale from light green to dark green (0% to 20%+)
+      const intensity = Math.min(gainLossPercent / 20, 1);
+      color = d3.interpolateRgb('#10b981', '#064e3b')(intensity);
+    } else if (gainLossPercent < 0) {
+      // Scale from light red to dark red (0% to -20%+)
+      const intensity = Math.min(Math.abs(gainLossPercent) / 20, 1);
+      color = d3.interpolateRgb('#ef4444', '#7f1d1d')(intensity);
+    }
 
     return {
       name: asset.symbol,
-      value: asset.purchasePrice * asset.quantity,
-      color: colors[asset.type] || '#4f46e5'
+      value: currentValue,
+      percentage: gainLossPercent,
+      color: color
     };
   });
 
@@ -1073,6 +1101,7 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
                       <tr className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
                         <th className="px-6 py-4">Asset</th>
                         <th className="px-6 py-4">Type</th>
+                        <th className="px-6 py-4">Div. Yield</th>
                         <th className="px-6 py-4">Quantity</th>
                         <th className="px-6 py-4">Purchase Price</th>
                         <th className="px-6 py-4">Current Value</th>
@@ -1113,6 +1142,15 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
                                   </span>
                                 )}
                               </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              {asset.dividendYield ? (
+                                <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded-lg">
+                                  {(asset.dividendYield * 100).toFixed(2)}%
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-xs">-</span>
+                              )}
                             </td>
                             <td className="px-6 py-4 font-medium text-slate-700 dark:text-slate-300">
                               {formatNumber(asset.quantity)}
@@ -1163,7 +1201,7 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
                       })}
                       {filteredAssets.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="px-6 py-12 text-center text-slate-400 dark:text-slate-500 italic">
+                          <td colSpan={8} className="px-6 py-12 text-center text-slate-400 dark:text-slate-500 italic">
                             {searchQuery ? "No assets match your search." : "No assets in this portfolio. Click \"Add Asset\" to get started."}
                           </td>
                         </tr>
