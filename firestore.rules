@@ -97,7 +97,9 @@ service cloud.firestore {
              data.quantity is number && data.quantity > 0 &&
              data.purchasePrice is number && data.purchasePrice >= 0 &&
              data.purchaseCurrency in ['USD'] &&
-             (!('type' in data) || data.type in ['Stock', 'Crypto', 'Commodity', 'Cash']) &&
+             (!('type' in data) || data.type in ['Stock', 'Crypto', 'Commodity', 'Cash', 'Fund']) &&
+             (!('dividendYield' in data) || (data.dividendYield == null || data.dividendYield is number)) &&
+             (!('currentPrice' in data) || (data.currentPrice == null || data.currentPrice is number)) &&
              isValidTimestamp(data.createdAt);
     }
 

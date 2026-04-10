@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useRef } from 'react';
+import { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
 import Papa from 'papaparse';
 import { AuthContext, ThemeContext } from './context';
@@ -39,138 +39,27 @@ import {
   FileUp,
   AlertCircle,
   CheckCircle2,
-  Target
+  Target,
+  Pencil,
+  Search,
+  Filter,
+  Download,
+  Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { UserProfile, Portfolio, Asset } from './types';
+import { fetchStockPrice, fetchCryptoPrice, fetchTefasPrice } from './services/finance';
+import { Button } from './components/ui/Button';
+import { Card } from './components/ui/Card';
+import { Treemap } from './components/dashboard/Treemap';
+import { Navbar } from './components/Navbar';
 
 // --- Constants ---
 
 // --- Services ---
 
-const fetchStockPrice = async (symbol: string): Promise<{ price: number; name: string } | null> => {
-  try {
-    const response = await fetch(`/api/price/stock/${symbol}`);
-    if (!response.ok) throw new Error('Failed to fetch');
-    return await response.json();
-  } catch (error) {
-    console.error(`Error fetching stock price for ${symbol}:`, error);
-    return null;
-  }
-};
-
-const fetchCryptoPrice = async (symbol: string): Promise<number | null> => {
-  try {
-    const response = await fetch(`/api/price/crypto/${symbol}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.price;
-  } catch (error) {
-    console.error(`Error fetching crypto price for ${symbol}:`, error);
-    return null;
-  }
-};
-
-const fetchTefasPrice = async (symbol: string, type?: string): Promise<number | null> => {
-  try {
-    const url = type ? `/api/price/tefas/${symbol}?type=${type}` : `/api/price/tefas/${symbol}`;
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.price;
-  } catch (error) {
-    console.error(`Error fetching TEFAS price for ${symbol}:`, error);
-    return null;
-  }
-};
-
 // --- Components ---
-
-function Treemap({ data }: { data: { name: string; value: number; color: string; percentage: number }[] }) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!svgRef.current || !containerRef.current || data.length === 0) return;
-
-    const width = containerRef.current.clientWidth;
-    const height = 400;
-
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
-
-    const root = d3.hierarchy({ children: data } as any)
-      .sum((d: any) => d.value)
-      .sort((a, b) => (b.value || 0) - (a.value || 0));
-
-    d3.treemap()
-      .size([width, height])
-      .padding(2)
-      .round(true)(root);
-
-    const leaf = svg.selectAll("g")
-      .data(root.leaves())
-      .join("g")
-      .attr("transform", (d: any) => `translate(${d.x0},${d.y0})`);
-
-    leaf.append("rect")
-      .attr("width", (d: any) => d.x1 - d.x0)
-      .attr("height", (d: any) => d.y1 - d.y0)
-      .attr("fill", (d: any) => d.data.color)
-      .attr("rx", 4)
-      .attr("opacity", 0.9)
-      .on("mouseenter", function() { d3.select(this).attr("opacity", 1); })
-      .on("mouseleave", function() { d3.select(this).attr("opacity", 0.9); });
-
-    leaf.append("text")
-      .attr("x", 5)
-      .attr("y", 15)
-      .attr("fill", "white")
-      .attr("font-size", "12px")
-      .attr("font-weight", "bold")
-      .text((d: any) => (d.x1 - d.x0 > 40 && d.y1 - d.y0 > 20) ? (d.data as any).name : "");
-
-    leaf.append("text")
-      .attr("x", 5)
-      .attr("y", 30)
-      .attr("fill", "white")
-      .attr("font-size", "10px")
-      .attr("opacity", 0.9)
-      .text((d: any) => (d.x1 - d.x0 > 60 && d.y1 - d.y0 > 40) ? formatCurrency((d.data as any).value) : "");
-
-    leaf.append("text")
-      .attr("x", 5)
-      .attr("y", 45)
-      .attr("fill", "white")
-      .attr("font-size", "10px")
-      .attr("font-weight", "bold")
-      .text((d: any) => {
-        if (d.x1 - d.x0 > 60 && d.y1 - d.y0 > 55) {
-          const p = (d.data as any).percentage;
-          return `${p >= 0 ? '+' : ''}${p.toFixed(2)}%`;
-        }
-        return "";
-      });
-
-  }, [data]);
-
-  return (
-    <div ref={containerRef} className="w-full bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 transition-colors">
-      <div className="flex items-center gap-2 mb-4">
-        <Layers className="w-4 h-4 text-indigo-600" />
-        <h3 className="font-bold text-slate-900 dark:text-white">Asset Allocation</h3>
-      </div>
-      {data.length > 0 ? (
-        <svg ref={svgRef} width="100%" height="400" className="rounded-lg overflow-hidden" />
-      ) : (
-        <div className="h-[400px] flex items-center justify-center text-slate-400 italic">
-          No data to visualize
-        </div>
-      )}
-    </div>
-  );
-}
 
 function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClose: () => void; onImport: (assets: Omit<Asset, 'id' | 'portfolioId'>[]) => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -360,87 +249,6 @@ function DeleteAllAssetsModal({ isOpen, onClose, onConfirm }: { isOpen: boolean;
   );
 }
 
-function Navbar({ user, profile, currentView, setView }: { user: any; profile: UserProfile | null; currentView: string; setView: (v: 'dashboard' | 'assets') => void }) {
-  const theme = useContext(ThemeContext);
-
-  return (
-    <nav className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-50 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16 items-center">
-          <div className="flex items-center gap-8">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('dashboard')}>
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                <TrendingUp className="text-white w-5 h-5" />
-              </div>
-              <span className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">FinTrack</span>
-            </div>
-
-            {user && (
-              <div className="hidden md:flex items-center gap-1">
-                <button
-                  onClick={() => setView('dashboard')}
-                  className={cn(
-                    "px-4 py-2 rounded-xl text-sm font-bold transition-all",
-                    currentView === 'dashboard' 
-                      ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400" 
-                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  Dashboard
-                </button>
-                <button
-                  onClick={() => setView('assets')}
-                  className={cn(
-                    "px-4 py-2 rounded-xl text-sm font-bold transition-all",
-                    currentView === 'assets' 
-                      ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400" 
-                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  Assets
-                </button>
-              </div>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <button
-              onClick={theme?.toggleTheme}
-              className="p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-              title="Toggle Theme"
-            >
-              {theme?.isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
-
-            {user ? (
-              <div className="flex items-center gap-3">
-                <div className="text-right hidden sm:block">
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">{user.displayName}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{profile?.baseCurrency || 'USD'}</p>
-                </div>
-                <button 
-                  onClick={() => signOut(auth)}
-                  className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors"
-                  title="Sign Out"
-                >
-                  <LogOut className="w-5 h-5" />
-                </button>
-              </div>
-            ) : (
-              <button 
-                onClick={() => signInWithPopup(auth, googleProvider)}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-              >
-                Sign In
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </nav>
-  );
-}
-
 function AddPortfolioModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: () => void; onAdd: (name: string, desc: string, goal: number) => void }) {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
@@ -562,9 +370,8 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
 
           if (fetchedPrice) {
             setCurrentPrice(fetchedPrice);
-            if (!price) {
-              setPrice(fetchedPrice.toString());
-            }
+            // Automatically update purchase price input when symbol/type changes
+            setPrice(fetchedPrice.toString());
           } else {
             setCurrentPrice(null);
             setFetchError('Price not found. Check symbol and type.');
@@ -580,7 +387,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [symbol, type, price]);
+  }, [symbol, type, tefasType]);
 
   if (!isOpen) return null;
 
@@ -666,9 +473,15 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
               <div className="flex justify-between items-center mb-1">
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Purchase Price (USD)</label>
                 {currentPrice !== null && (
-                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded">
+                  <button 
+                    type="button"
+                    onClick={() => setPrice(currentPrice.toString())}
+                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-800/50 transition-colors"
+                    title="Copy live price to purchase price"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" />
                     Live: {formatCurrency(currentPrice)}
-                  </span>
+                  </button>
                 )}
               </div>
               <input 
@@ -743,6 +556,235 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
   );
 }
 
+function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; onClose: () => void; onEdit: (assetId: string, updates: Partial<Asset>) => void; asset: Asset | null }) {
+  const [symbol, setSymbol] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [price, setPrice] = useState('');
+  const [dividendYield, setDividendYield] = useState('');
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [type, setType] = useState<Asset['type']>('Stock');
+  const [tefasType, setTefasType] = useState<'YAT' | 'EMK' | 'BYF'>('YAT');
+  const [isFetching, setIsFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (asset) {
+      setSymbol(asset.symbol);
+      setQuantity(asset.quantity.toString());
+      setPrice(asset.purchasePrice.toString());
+      setDividendYield(asset.dividendYield ? (asset.dividendYield * 100).toString() : '');
+      setCurrentPrice(asset.currentPrice || null);
+      setType(asset.type);
+      setTefasType(asset.tefasType || 'YAT');
+    }
+  }, [asset]);
+
+  const totalAmount = parseFloat(quantity) * parseFloat(price);
+
+  const handleClose = () => {
+    onClose();
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (symbol.length >= 2 && symbol !== asset?.symbol) {
+        setIsFetching(true);
+        setFetchError(null);
+        let fetchedPrice: number | null = null;
+        
+        try {
+          if (type === 'Crypto') {
+            fetchedPrice = await fetchCryptoPrice(symbol);
+          } else if (type === 'Stock') {
+            const result = await fetchStockPrice(symbol);
+            if (result) fetchedPrice = result.price;
+          } else if (type === 'Fund') {
+            fetchedPrice = await fetchTefasPrice(symbol, tefasType);
+          }
+
+          if (fetchedPrice) {
+            setCurrentPrice(fetchedPrice);
+            setPrice(fetchedPrice.toString());
+          } else {
+            setCurrentPrice(null);
+            setFetchError('Price not found. Check symbol and type.');
+          }
+        } catch (e) {
+          setFetchError('Failed to fetch price.');
+        }
+        setIsFetching(false);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [symbol, type, tefasType, asset?.symbol]);
+
+  if (!isOpen || !asset) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-xl border border-slate-200 dark:border-slate-800 transition-colors"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Edit Asset</h3>
+          {isFetching && (
+            <div className="flex items-center gap-2 text-xs text-indigo-600 animate-pulse">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              Fetching price...
+            </div>
+          )}
+        </div>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Symbol</label>
+              <input 
+                type="text" 
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                placeholder="AAPL, BTC..."
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Type</label>
+              <select 
+                value={type}
+                onChange={(e) => setType(e.target.value as Asset['type'])}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
+              >
+                <option value="Stock">Stock</option>
+                <option value="Crypto">Crypto</option>
+                <option value="Commodity">Commodity</option>
+                <option value="Fund">Fund (TEFAS)</option>
+                <option value="Cash">Cash</option>
+              </select>
+            </div>
+          </div>
+
+          {type === 'Fund' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Fund Type</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['YAT', 'EMK', 'BYF'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTefasType(t)}
+                    className={cn(
+                      "px-3 py-2 text-xs font-bold rounded-lg border transition-all",
+                      tefasType === t
+                        ? "bg-indigo-600 border-indigo-600 text-white"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-indigo-400"
+                    )}
+                  >
+                    {t === 'YAT' ? 'Yatırım' : t === 'EMK' ? 'Emeklilik' : 'BYF'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Quantity</label>
+              <input 
+                type="number" 
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
+              />
+            </div>
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Purchase Price (USD)</label>
+                {currentPrice !== null && (
+                  <button 
+                    type="button"
+                    onClick={() => setPrice(currentPrice.toString())}
+                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-800/50 transition-colors"
+                    title="Copy live price to purchase price"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" />
+                    Live: {formatCurrency(currentPrice)}
+                  </button>
+                )}
+              </div>
+              <input 
+                type="number" 
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
+              />
+            </div>
+          </div>
+
+          {(type === 'Stock' || type === 'Fund') && (
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Annual Dividend Yield (%)</label>
+                <span className="text-[10px] text-slate-400 italic">Manual entry</span>
+              </div>
+              <input 
+                type="number" 
+                value={dividendYield}
+                onChange={(e) => setDividendYield(e.target.value)}
+                placeholder="e.g. 4.5"
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
+              />
+            </div>
+          )}
+
+          {!isNaN(totalAmount) && totalAmount > 0 && (
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800 flex justify-between items-center">
+              <span className="text-sm text-slate-500 dark:text-slate-400">Total Amount</span>
+              <span className="text-lg font-bold text-slate-900 dark:text-white">{formatCurrency(totalAmount)}</span>
+            </div>
+          )}
+
+          {fetchError && (
+            <div className="flex items-center gap-2 text-xs text-rose-600 bg-rose-50 dark:bg-rose-900/20 p-2 rounded-lg border border-rose-100 dark:border-rose-900/30">
+              <AlertCircle className="w-3 h-3" />
+              {fetchError}
+            </div>
+          )}
+        </div>
+        <div className="mt-6 flex gap-3">
+          <button 
+            onClick={handleClose}
+            className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={() => {
+              onEdit(asset.id, {
+                symbol,
+                name: symbol,
+                quantity: parseFloat(quantity),
+                purchasePrice: parseFloat(price),
+                type,
+                tefasType: type === 'Fund' ? tefasType : undefined,
+                dividendYield: dividendYield ? parseFloat(dividendYield) / 100 : undefined
+              });
+              handleClose();
+            }}
+            disabled={!symbol || !quantity || !price}
+            className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+          >
+            Save Changes
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
   const authContext = useContext(AuthContext);
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -750,6 +792,8 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isAddPortfolioOpen, setIsAddPortfolioOpen] = useState(false);
   const [isAddAssetOpen, setIsAddAssetOpen] = useState(false);
+  const [isEditAssetOpen, setIsEditAssetOpen] = useState(false);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [isCSVImportOpen, setIsCSVImportOpen] = useState(false);
   const [isDeleteAllOpen, setIsDeleteAllOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -801,20 +845,53 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
       for (const asset of assets) {
         try {
           let price = null;
+          let dividendYield = asset.dividendYield;
+          let dividendGrowth5Y = asset.dividendGrowth5Y;
+          let dividendGrowth10Y = asset.dividendGrowth10Y;
+
           if (asset.type === 'Stock') {
             const result = await fetchStockPrice(asset.symbol);
-            if (result) price = result.price;
+            if (result) {
+              price = result.price;
+              // Update dividend yield and growth if they were not manually set or if we found new ones
+              if (result.dividendYield !== undefined) {
+                dividendYield = result.dividendYield;
+              }
+              if (result.dividendGrowth5Y !== undefined) {
+                dividendGrowth5Y = result.dividendGrowth5Y;
+              }
+              if (result.dividendGrowth10Y !== undefined) {
+                dividendGrowth10Y = result.dividendGrowth10Y;
+              }
+            }
           } else if (asset.type === 'Crypto') {
             price = await fetchCryptoPrice(asset.symbol);
           } else if (asset.type === 'Fund') {
             price = await fetchTefasPrice(asset.symbol, asset.tefasType);
           }
 
-          // Only update if price is valid and different
+          // Only update if price or dividend data is valid and different
+          const updates: any = {};
           if (price !== null && price !== asset.currentPrice) {
-            const assetRef = doc(db, `portfolios/${asset.portfolioId}/assets`, asset.id);
-            await setDoc(assetRef, { currentPrice: price }, { merge: true });
+            updates.currentPrice = price;
           }
+          if (dividendYield !== undefined && dividendYield !== asset.dividendYield) {
+            updates.dividendYield = dividendYield;
+          }
+          if (dividendGrowth5Y !== undefined && dividendGrowth5Y !== asset.dividendGrowth5Y) {
+            updates.dividendGrowth5Y = dividendGrowth5Y;
+          }
+          if (dividendGrowth10Y !== undefined && dividendGrowth10Y !== asset.dividendGrowth10Y) {
+            updates.dividendGrowth10Y = dividendGrowth10Y;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            const assetRef = doc(db, `portfolios/${asset.portfolioId}/assets`, asset.id);
+            await setDoc(assetRef, updates, { merge: true });
+          }
+
+          // Add a small delay between requests to avoid rate limits (as requested by user)
+          await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (e) {
           console.error(`Error updating price for ${asset.symbol}:`, e);
         }
@@ -852,11 +929,26 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
       const newDocRef = doc(collection(db, `portfolios/${selectedPortfolioId}/assets`));
       
       // Fetch initial price immediately
-      let initialPrice = undefined;
+      let initialPrice: number | null = null;
+      let initialDividendYield = assetData.dividendYield || null;
+      let initialDividendGrowth5Y = assetData.dividendGrowth5Y || null;
+      let initialDividendGrowth10Y = assetData.dividendGrowth10Y || null;
+
       try {
         if (assetData.type === 'Stock') {
           const res = await fetchStockPrice(assetData.symbol);
-          if (res) initialPrice = res.price;
+          if (res) {
+            initialPrice = res.price;
+            if (res.dividendYield !== undefined) {
+              initialDividendYield = res.dividendYield;
+            }
+            if (res.dividendGrowth5Y !== undefined) {
+              initialDividendGrowth5Y = res.dividendGrowth5Y;
+            }
+            if (res.dividendGrowth10Y !== undefined) {
+              initialDividendGrowth10Y = res.dividendGrowth10Y;
+            }
+          }
         } else if (assetData.type === 'Crypto') {
           initialPrice = await fetchCryptoPrice(assetData.symbol);
         } else if (assetData.type === 'Fund') {
@@ -866,16 +958,54 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
         console.error("Initial price fetch failed:", e);
       }
 
-      await setDoc(newDocRef, {
+      const dataToSave = {
         ...assetData,
         currentPrice: initialPrice,
+        dividendYield: initialDividendYield,
+        dividendGrowth5Y: initialDividendGrowth5Y,
+        dividendGrowth10Y: initialDividendGrowth10Y,
         id: newDocRef.id,
         portfolioId: selectedPortfolioId,
         ownerId: authContext.user.uid,
         createdAt: serverTimestamp()
+      };
+
+      // Remove undefined fields for Firestore compatibility
+      Object.keys(dataToSave).forEach(key => {
+        if ((dataToSave as any)[key] === undefined) {
+          delete (dataToSave as any)[key];
+        }
       });
+
+      await setDoc(newDocRef, dataToSave);
     } catch (err) {
       console.error("Error adding asset:", err);
+    }
+  };
+
+  const handleEditAsset = async (assetId: string, updates: Partial<Asset>) => {
+    if (!selectedPortfolioId || !authContext?.user) return;
+    try {
+      const assetRef = doc(db, `portfolios/${selectedPortfolioId}/assets`, assetId);
+      
+      // If symbol or type changed, we might want to reset currentPrice to trigger a re-fetch
+      const currentAsset = assets.find(a => a.id === assetId);
+      const dataToSave = { ...updates };
+
+      if (updates.symbol && updates.symbol !== currentAsset?.symbol) {
+        (dataToSave as any).currentPrice = null;
+      }
+
+      // Remove undefined fields
+      Object.keys(dataToSave).forEach(key => {
+        if ((dataToSave as any)[key] === undefined) {
+          delete (dataToSave as any)[key];
+        }
+      });
+
+      await setDoc(assetRef, dataToSave, { merge: true });
+    } catch (err) {
+      console.error("Error editing asset:", err);
     }
   };
 
@@ -906,13 +1036,22 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
     try {
       const promises = importedAssets.map(asset => {
         const newDocRef = doc(collection(db, `portfolios/${selectedPortfolioId}/assets`));
-        return setDoc(newDocRef, {
+        const dataToSave = {
           ...asset,
           id: newDocRef.id,
           portfolioId: selectedPortfolioId,
           ownerId: authContext.user.uid,
           createdAt: serverTimestamp()
+        };
+
+        // Remove undefined fields for Firestore compatibility
+        Object.keys(dataToSave).forEach(key => {
+          if ((dataToSave as any)[key] === undefined) {
+            delete (dataToSave as any)[key];
+          }
         });
+
+        return setDoc(newDocRef, dataToSave);
       });
       
       await Promise.all(promises);
@@ -951,30 +1090,52 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
     asset.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const treemapData = assets.map(asset => {
-    const currentValue = (asset.currentPrice || asset.purchasePrice) * asset.quantity;
-    const gainLossPercent = asset.currentPrice ? ((asset.currentPrice - asset.purchasePrice) / asset.purchasePrice) * 100 : 0;
-
-    // Color scale for gain/loss
-    // Green shades for gain, Red shades for loss
-    let color = '#64748b'; // Default slate
-    if (gainLossPercent > 0) {
-      // Scale from light green to dark green (0% to 20%+)
-      const intensity = Math.min(gainLossPercent / 20, 1);
-      color = d3.interpolateRgb('#10b981', '#064e3b')(intensity);
-    } else if (gainLossPercent < 0) {
-      // Scale from light red to dark red (0% to -20%+)
-      const intensity = Math.min(Math.abs(gainLossPercent) / 20, 1);
-      color = d3.interpolateRgb('#ef4444', '#7f1d1d')(intensity);
+  const treemapData = useMemo(() => {
+    interface AggregatedAsset {
+      symbol: string;
+      totalCurrentValue: number;
+      totalCostValue: number;
     }
+    const aggregated = assets.reduce((acc: Record<string, AggregatedAsset>, asset) => {
+      const symbol = asset.symbol;
+      const currentValue = (asset.currentPrice || asset.purchasePrice) * asset.quantity;
+      const costValue = asset.purchasePrice * asset.quantity;
 
-    return {
-      name: asset.symbol,
-      value: currentValue,
-      percentage: gainLossPercent,
-      color: color
-    };
-  });
+      if (!acc[symbol]) {
+        acc[symbol] = {
+          symbol,
+          totalCurrentValue: 0,
+          totalCostValue: 0,
+        };
+      }
+
+      acc[symbol].totalCurrentValue += currentValue;
+      acc[symbol].totalCostValue += costValue;
+      return acc;
+    }, {} as Record<string, AggregatedAsset>);
+
+    return Object.values(aggregated).map((item: AggregatedAsset) => {
+      const gainLossPercent = item.totalCostValue > 0 
+        ? ((item.totalCurrentValue - item.totalCostValue) / item.totalCostValue) * 100 
+        : 0;
+
+      let color = '#64748b';
+      if (gainLossPercent > 0) {
+        const intensity = Math.min(gainLossPercent / 20, 1);
+        color = d3.interpolateRgb('#10b981', '#064e3b')(intensity);
+      } else if (gainLossPercent < 0) {
+        const intensity = Math.min(Math.abs(gainLossPercent) / 20, 1);
+        color = d3.interpolateRgb('#ef4444', '#7f1d1d')(intensity);
+      }
+
+      return {
+        name: item.symbol,
+        value: item.totalCurrentValue,
+        percentage: gainLossPercent,
+        color: color
+      };
+    });
+  }, [assets]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1123,6 +1284,8 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
                         <th className="px-6 py-4">Asset</th>
                         <th className="px-6 py-4">Type</th>
                         <th className="px-6 py-4">Div. Yield</th>
+                        <th className="px-6 py-4">5Y Growth</th>
+                        <th className="px-6 py-4">10Y Growth</th>
                         <th className="px-6 py-4">Quantity</th>
                         <th className="px-6 py-4">Purchase Price</th>
                         <th className="px-6 py-4">Current Value</th>
@@ -1173,6 +1336,30 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
                                 <span className="text-slate-400 text-xs">-</span>
                               )}
                             </td>
+                            <td className="px-6 py-4">
+                              {asset.dividendGrowth5Y ? (
+                                <span className={cn(
+                                  "text-xs font-bold",
+                                  asset.dividendGrowth5Y > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                                )}>
+                                  {asset.dividendGrowth5Y > 0 ? '+' : ''}{(asset.dividendGrowth5Y * 100).toFixed(2)}%
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-xs">-</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              {asset.dividendGrowth10Y ? (
+                                <span className={cn(
+                                  "text-xs font-bold",
+                                  asset.dividendGrowth10Y > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                                )}>
+                                  {asset.dividendGrowth10Y > 0 ? '+' : ''}{(asset.dividendGrowth10Y * 100).toFixed(2)}%
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-xs">-</span>
+                              )}
+                            </td>
                             <td className="px-6 py-4 font-medium text-slate-700 dark:text-slate-300">
                               {formatNumber(asset.quantity)}
                             </td>
@@ -1210,12 +1397,25 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
                               )}
                             </td>
                             <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={() => handleDeleteAsset(asset.id)}
-                                className="p-2 text-slate-300 dark:text-slate-600 hover:text-rose-600 dark:hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={() => {
+                                    setEditingAsset(asset);
+                                    setIsEditAssetOpen(true);
+                                  }}
+                                  className="p-2 text-slate-300 dark:text-slate-600 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                                  title="Edit asset"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteAsset(asset.id)}
+                                  className="p-2 text-slate-300 dark:text-slate-600 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                                  title="Delete asset"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1264,6 +1464,15 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
             isOpen={isAddAssetOpen} 
             onClose={() => setIsAddAssetOpen(false)} 
             onAdd={handleAddAsset}
+          />
+          <EditAssetModal
+            isOpen={isEditAssetOpen}
+            onClose={() => {
+              setIsEditAssetOpen(false);
+              setEditingAsset(null);
+            }}
+            onEdit={handleEditAsset}
+            asset={editingAsset}
           />
           <CSVImportModal
             isOpen={isCSVImportOpen}

@@ -26,4 +26,6 @@ export interface Asset {
   currentPrice?: number;
   tefasType?: 'YAT' | 'EMK' | 'BYF';
   dividendYield?: number; // Annual percentage (e.g., 0.05 for 5%)
+  dividendGrowth5Y?: number; // 5 Year CAGR (e.g., 0.10 for 10%)
+  dividendGrowth10Y?: number; // 10 Year CAGR
 }

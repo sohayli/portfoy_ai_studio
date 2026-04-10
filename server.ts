@@ -15,7 +15,11 @@ async function startServer() {
   // Helper to get USD/TRY rate
   async function getUsdTryRate() {
     try {
-      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/USDTRY=X`);
+      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/USDTRY=X`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+        }
+      });
       if (!response.ok) return 32.5; // Fallback rate
       const data: any = await response.json();
       return data.chart.result[0].meta.regularMarketPrice;
@@ -27,13 +31,67 @@ async function startServer() {
   // API Rotaları
   app.get("/api/price/stock/:symbol", async (req, res) => {
     const { symbol } = req.params;
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Referer': 'https://finance.yahoo.com/'
+    };
+
     try {
-      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
-      if (!response.ok) throw new Error('Failed to fetch from Yahoo');
-      const data: any = await response.json();
-      const quote = data.chart.result[0].meta;
+      // Fetch 11 years of data to calculate 10-year growth
+      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1mo&range=11y&events=div`, { headers });
       
-      let price = quote.regularMarketPrice;
+      if (!response.ok) throw new Error('Failed to fetch from Yahoo');
+      
+      const data: any = await response.json();
+      if (!data.chart?.result?.[0]) {
+        throw new Error('No data found for symbol');
+      }
+
+      const result = data.chart.result[0];
+      const meta = result.meta;
+      let price = meta.regularMarketPrice;
+      const dividends = result.events?.dividends;
+      
+      let dividendYield = 0;
+      let dividendGrowth5Y = 0;
+      let dividendGrowth10Y = 0;
+
+      if (dividends) {
+        const divList = Object.values(dividends)
+          .map((d: any) => ({ date: new Date(d.date * 1000), amount: d.amount }))
+          .sort((a, b) => b.date.getTime() - a.date.getTime());
+
+        // Current Yield (Last 12 months)
+        const now = new Date();
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(now.getFullYear() - 1);
+        
+        const lastYearDividends = divList
+          .filter(d => d.date >= oneYearAgo)
+          .reduce((acc, d) => acc + d.amount, 0);
+        
+        dividendYield = price > 0 ? lastYearDividends / price : 0;
+
+        // Growth Calculation Helper
+        const calculateAnnualDiv = (yearsAgo: number) => {
+          const targetYear = now.getFullYear() - yearsAgo;
+          return divList
+            .filter(d => d.date.getFullYear() === targetYear)
+            .reduce((acc, d) => acc + d.amount, 0);
+        };
+
+        const currentAnnual = lastYearDividends || calculateAnnualDiv(0);
+        const fiveYearsAgoAnnual = calculateAnnualDiv(6);
+        const tenYearsAgoAnnual = calculateAnnualDiv(11);
+
+        if (currentAnnual > 0 && fiveYearsAgoAnnual > 0) {
+          dividendGrowth5Y = (Math.pow(currentAnnual / fiveYearsAgoAnnual, 1/5) - 1);
+        }
+        if (currentAnnual > 0 && tenYearsAgoAnnual > 0) {
+          dividendGrowth10Y = (Math.pow(currentAnnual / tenYearsAgoAnnual, 1/10) - 1);
+        }
+      }
       
       // Borsa Istanbul stocks (.IS) are in TRY, convert to USD
       if (symbol.toUpperCase().endsWith('.IS')) {
@@ -43,8 +101,12 @@ async function startServer() {
 
       res.json({
         price: price,
-        name: symbol
+        dividendYield: dividendYield,
+        dividendGrowth5Y: dividendGrowth5Y,
+        dividendGrowth10Y: dividendGrowth10Y,
+        name: meta.longName || symbol
       });
+
     } catch (error) {
       console.error(`Error fetching stock price for ${symbol}:`, error);
       res.status(500).json({ error: "Failed to fetch stock price" });
@@ -82,61 +144,69 @@ async function startServer() {
       const startDateStr = formatDate(startDate);
       const endDateStr = formatDate(endDate);
 
-      // 1. First, fetch the root page to get a session cookie (mimicking requests.session())
-      const rootResponse = await fetch('https://fundturkey.com.tr', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36'
-        }
-      });
-      
-      const setCookies = (rootResponse.headers as any).getSetCookie ? (rootResponse.headers as any).getSetCookie() : [];
-      let cookieHeader = '';
-      if (setCookies.length > 0) {
-        cookieHeader = setCookies.map((c: string) => c.split(';')[0].trim()).join('; ');
-      } else {
-        const rawCookie = rootResponse.headers.get('set-cookie');
-        if (rawCookie) cookieHeader = rawCookie;
-      }
-
       const fetchTefasData = async (fontip: string) => {
-        const response = await fetch('https://fundturkey.com.tr/api/DB/BindHistoryInfo', {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'Origin': 'https://fundturkey.com.tr',
-            'Referer': 'https://fundturkey.com.tr/TarihselVeriler.aspx',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36',
-            'X-Requested-With': 'XMLHttpRequest',
-            ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
-          },
-          body: new URLSearchParams({
-            'fontip': fontip,
-            'bastarih': startDateStr,
-            'bittarih': endDateStr,
-            'fonkod': symbol.toUpperCase()
-          })
-        });
+        const urls = [
+          'https://fundturkey.com.tr/api/DB/BindHistoryInfo',
+          'https://www.tefas.gov.tr/api/DB/BindHistoryInfo'
+        ];
 
-        if (!response.ok) return null;
-        
-        const text = await response.text();
-        if (!text || text.trim() === '') return null;
-        
-        try {
-          const result = JSON.parse(text);
-          const data = result?.data;
-          if (data && Array.isArray(data) && data.length > 0) {
-            // Sort by TARIH descending to ensure we get the latest
-            data.sort((a: any, b: any) => parseInt(b.TARIH) - parseInt(a.TARIH));
-            return data[0].FIYAT || null;
+        for (const url of urls) {
+          const domain = new URL(url).origin;
+          try {
+            // 1. Fetch root to get cookies
+            const rootResponse = await fetch(domain, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+              }
+            });
+            
+            const setCookies = (rootResponse.headers as any).getSetCookie ? (rootResponse.headers as any).getSetCookie() : [];
+            let cookieHeader = '';
+            if (setCookies.length > 0) {
+              cookieHeader = setCookies.map((c: string) => c.split(';')[0].trim()).join('; ');
+            } else {
+              const rawCookie = rootResponse.headers.get('set-cookie');
+              if (rawCookie) cookieHeader = rawCookie;
+            }
+
+            // 2. Fetch data
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Origin': domain,
+                'Referer': `${domain}/TarihselVeriler.aspx`,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'X-Requested-With': 'XMLHttpRequest',
+                ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
+              },
+              body: new URLSearchParams({
+                'fontip': fontip,
+                'bastarih': startDateStr,
+                'bittarih': endDateStr,
+                'fonkod': symbol.toUpperCase()
+              })
+            });
+
+            if (!response.ok) continue;
+            
+            const text = await response.text();
+            if (!text || text.trim() === '' || text.includes('<title>Request Rejected</title>')) continue;
+            
+            const result = JSON.parse(text);
+            const data = result?.data;
+            if (data && Array.isArray(data) && data.length > 0) {
+              data.sort((a: any, b: any) => parseInt(b.TARIH) - parseInt(a.TARIH));
+              return data[0].FIYAT || null;
+            }
+          } catch (e) {
+            console.warn(`Failed to fetch from ${domain} for ${symbol}:`, e instanceof Error ? e.message : String(e));
+            continue;
           }
-          return null;
-        } catch (e) {
-          console.error(`Failed to parse TEFAS JSON for ${symbol} (${fontip}):`, text.substring(0, 100));
-          return null;
         }
+        return null;
       };
 
       const processPrice = async (price: number | null) => {
