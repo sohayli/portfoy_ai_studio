@@ -22,7 +22,7 @@ export interface Asset {
   quantity: number;
   purchasePrice: number;
   purchaseCurrency: 'USD';
-  type: 'Stock' | 'Crypto' | 'Commodity' | 'Cash' | 'Fund';
+  type: 'Stock' | 'Crypto' | 'Commodity' | 'Cash' | 'Fund' | 'GovernmentContribution';
   currentPrice?: number;
   tefasType?: 'YAT' | 'EMK' | 'BYF';
   dividendYield?: number; // Annual percentage (e.g., 0.05 for 5%)

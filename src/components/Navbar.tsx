@@ -5,7 +5,8 @@ import {
   User as UserIcon,
   Moon,
   Sun,
-  RefreshCw
+  RefreshCw,
+  Settings
 } from 'lucide-react';
 import { auth, signOut, signInWithPopup, googleProvider } from '../lib/firebase';
 import { ThemeContext } from '../context';
@@ -16,7 +17,7 @@ interface NavbarProps {
   user: any;
   profile: UserProfile | null;
   currentView: string;
-  setView: (v: 'dashboard' | 'assets') => void;
+  setView: (v: 'dashboard' | 'assets' | 'settings') => void;
 }
 
 export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
@@ -57,6 +58,17 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
                   )}
                 >
                   Assets
+                </button>
+                <button
+                  onClick={() => setView('settings')}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                    currentView === 'settings' 
+                      ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400" 
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  Settings
                 </button>
               </div>
             )}

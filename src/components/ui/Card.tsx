@@ -4,9 +4,10 @@ import { cn } from '../../lib/utils';
 interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   hover?: boolean;
   className?: string;
+  children?: React.ReactNode;
 }
 
-export const Card = ({ className, hover = false, ...props }: CardProps) => {
+export const Card: React.FC<CardProps> = ({ className, hover = false, children, ...props }) => {
   return (
     <div
       className={cn(
@@ -15,6 +16,8 @@ export const Card = ({ className, hover = false, ...props }: CardProps) => {
         className
       )}
       {...props}
-    />
+    >
+      {children}
+    </div>
   );
 };

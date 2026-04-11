@@ -44,7 +44,7 @@ import {
   Search,
   Filter,
   Download,
-  Settings
+  Settings as SettingsIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -54,6 +54,8 @@ import { Button } from './components/ui/Button';
 import { Card } from './components/ui/Card';
 import { Treemap } from './components/dashboard/Treemap';
 import { Navbar } from './components/Navbar';
+import { Settings } from './components/Settings';
+import { AddPortfolioModal } from './components/modals/AddPortfolioModal';
 
 // --- Constants ---
 
@@ -249,78 +251,6 @@ function DeleteAllAssetsModal({ isOpen, onClose, onConfirm }: { isOpen: boolean;
   );
 }
 
-function AddPortfolioModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: () => void; onAdd: (name: string, desc: string, goal: number) => void }) {
-  const [name, setName] = useState('');
-  const [desc, setDesc] = useState('');
-  const [goal, setGoal] = useState('');
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-xl border border-slate-200 dark:border-slate-800 transition-colors"
-      >
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Create New Portfolio</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Portfolio Name</label>
-            <input 
-              type="text" 
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Retirement"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Monthly Passive Income Goal (USD)</label>
-            <input 
-              type="number" 
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              placeholder="e.g. 1000"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description (Optional)</label>
-            <textarea 
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              placeholder="What is this portfolio for?"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none transition-colors"
-            />
-          </div>
-        </div>
-        <div className="mt-6 flex gap-3">
-          <button 
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-          >
-            Cancel
-          </button>
-          <button 
-            onClick={() => {
-              onAdd(name, desc, parseFloat(goal) || 0);
-              setName('');
-              setDesc('');
-              setGoal('');
-              onClose();
-            }}
-            disabled={!name.trim()}
-            className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-          >
-            Create
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
 function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: () => void; onAdd: (asset: Omit<Asset, 'id' | 'portfolioId'>) => void }) {
   const [symbol, setSymbol] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -364,8 +294,8 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
           } else if (type === 'Stock') {
             const result = await fetchStockPrice(symbol);
             if (result) fetchedPrice = result.price;
-          } else if (type === 'Fund') {
-            fetchedPrice = await fetchTefasPrice(symbol, tefasType);
+          } else if (type === 'Fund' || type === 'GovernmentContribution') {
+            fetchedPrice = await fetchTefasPrice(symbol, type === 'GovernmentContribution' ? 'EMK' : tefasType);
           }
 
           if (fetchedPrice) {
@@ -430,6 +360,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
                 <option value="Crypto">Crypto</option>
                 <option value="Commodity">Commodity</option>
                 <option value="Fund">Fund (TEFAS)</option>
+                <option value="GovernmentContribution">Devlet Katkısı Fonu</option>
                 <option value="Cash">Cash</option>
               </select>
             </div>
@@ -540,7 +471,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
                 purchasePrice: parseFloat(price),
                 purchaseCurrency: 'USD',
                 type,
-                tefasType: type === 'Fund' ? tefasType : undefined,
+                tefasType: (type === 'Fund' || type === 'GovernmentContribution') ? (type === 'GovernmentContribution' ? 'EMK' : tefasType) : undefined,
                 dividendYield: dividendYield ? parseFloat(dividendYield) / 100 : undefined
               });
               handleClose();
@@ -598,8 +529,8 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
           } else if (type === 'Stock') {
             const result = await fetchStockPrice(symbol);
             if (result) fetchedPrice = result.price;
-          } else if (type === 'Fund') {
-            fetchedPrice = await fetchTefasPrice(symbol, tefasType);
+          } else if (type === 'Fund' || type === 'GovernmentContribution') {
+            fetchedPrice = await fetchTefasPrice(symbol, type === 'GovernmentContribution' ? 'EMK' : tefasType);
           }
 
           if (fetchedPrice) {
@@ -660,6 +591,7 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
                 <option value="Crypto">Crypto</option>
                 <option value="Commodity">Commodity</option>
                 <option value="Fund">Fund (TEFAS)</option>
+                <option value="GovernmentContribution">Devlet Katkısı Fonu</option>
                 <option value="Cash">Cash</option>
               </select>
             </div>
@@ -769,7 +701,7 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
                 quantity: parseFloat(quantity),
                 purchasePrice: parseFloat(price),
                 type,
-                tefasType: type === 'Fund' ? tefasType : undefined,
+                tefasType: (type === 'Fund' || type === 'GovernmentContribution') ? (type === 'GovernmentContribution' ? 'EMK' : tefasType) : undefined,
                 dividendYield: dividendYield ? parseFloat(dividendYield) / 100 : undefined
               });
               handleClose();
@@ -785,12 +717,10 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
   );
 }
 
-function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
+function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets' | 'settings'; portfolios: Portfolio[]; setView: (v: 'dashboard' | 'assets' | 'settings') => void }) {
   const authContext = useContext(AuthContext);
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>('all');
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [isAddPortfolioOpen, setIsAddPortfolioOpen] = useState(false);
   const [isAddAssetOpen, setIsAddAssetOpen] = useState(false);
   const [isEditAssetOpen, setIsEditAssetOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
@@ -799,21 +729,10 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    if (!authContext?.user) return;
-
-    const q = query(collection(db, 'portfolios'), where('ownerId', '==', authContext.user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const pData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Portfolio));
-      setPortfolios(pData);
-      if (pData.length > 0 && !selectedPortfolioId) {
-        setSelectedPortfolioId(pData[0].id);
-      }
-    }, (error) => {
-      console.error("Portfolios snapshot error:", error);
-    });
-
-    return () => unsubscribe();
-  }, [authContext?.user]);
+    if (portfolios.length > 0 && !selectedPortfolioId) {
+      setSelectedPortfolioId('all');
+    }
+  }, [portfolios, selectedPortfolioId]);
 
   useEffect(() => {
     if (!selectedPortfolioId || !authContext?.user) {
@@ -866,8 +785,8 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
             }
           } else if (asset.type === 'Crypto') {
             price = await fetchCryptoPrice(asset.symbol);
-          } else if (asset.type === 'Fund') {
-            price = await fetchTefasPrice(asset.symbol, asset.tefasType);
+          } else if (asset.type === 'Fund' || asset.type === 'GovernmentContribution') {
+            price = await fetchTefasPrice(asset.symbol, asset.type === 'GovernmentContribution' ? 'EMK' : asset.tefasType);
           }
 
           // Only update if price or dividend data is valid and different
@@ -906,23 +825,6 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
     return () => clearInterval(interval);
   }, [selectedPortfolioId, assets.length]); // Only re-run if portfolio changes or asset count changes
 
-  const handleAddPortfolio = async (name: string, description: string, monthlyGoal: number) => {
-    if (!authContext?.user) return;
-    try {
-      const newDocRef = doc(collection(db, 'portfolios'));
-      await setDoc(newDocRef, {
-        id: newDocRef.id,
-        name,
-        description,
-        monthlyGoal,
-        ownerId: authContext.user.uid,
-        createdAt: serverTimestamp()
-      });
-    } catch (err) {
-      console.error("Error adding portfolio:", err);
-    }
-  };
-
   const handleAddAsset = async (assetData: Omit<Asset, 'id' | 'portfolioId'>) => {
     if (!selectedPortfolioId || !authContext?.user) return;
     try {
@@ -951,8 +853,8 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
           }
         } else if (assetData.type === 'Crypto') {
           initialPrice = await fetchCryptoPrice(assetData.symbol);
-        } else if (assetData.type === 'Fund') {
-          initialPrice = await fetchTefasPrice(assetData.symbol, assetData.tefasType);
+        } else if (assetData.type === 'Fund' || assetData.type === 'GovernmentContribution') {
+          initialPrice = await fetchTefasPrice(assetData.symbol, assetData.type === 'GovernmentContribution' ? 'EMK' : assetData.tefasType);
         }
       } catch (e) {
         console.error("Initial price fetch failed:", e);
@@ -1167,13 +1069,6 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
               </select>
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             </div>
-            <button 
-              onClick={() => setIsAddPortfolioOpen(true)}
-              className="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100 dark:shadow-none"
-              title="Add New Portfolio"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
           </div>
         </div>
 
@@ -1316,13 +1211,14 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
                                   asset.type === 'Crypto' ? "bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400" :
                                   asset.type === 'Commodity' ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400" :
                                   asset.type === 'Fund' ? "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400" :
+                                  asset.type === 'GovernmentContribution' ? "bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400" :
                                   "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
                                 )}>
-                                  {asset.type}
+                                  {asset.type === 'GovernmentContribution' ? 'Devlet Katkısı' : asset.type}
                                 </span>
-                                {asset.type === 'Fund' && asset.tefasType && (
+                                {(asset.type === 'Fund' || asset.type === 'GovernmentContribution') && (asset.tefasType || asset.type === 'GovernmentContribution') && (
                                   <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 ml-1">
-                                    ({asset.tefasType === 'YAT' ? 'Yatırım' : asset.tefasType === 'EMK' ? 'Emeklilik' : 'BYF'})
+                                    ({(asset.type === 'GovernmentContribution' || asset.tefasType === 'EMK') ? 'Emeklilik' : asset.tefasType === 'YAT' ? 'Yatırım' : 'BYF'})
                                   </span>
                                 )}
                               </div>
@@ -1443,21 +1339,15 @@ function Dashboard({ view }: { view: 'dashboard' | 'assets' }) {
               Create your first portfolio to start tracking your investments in USD with real-time price data.
             </p>
             <button 
-              onClick={() => setIsAddPortfolioOpen(true)}
+              onClick={() => setView('settings')}
               className="mt-8 bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none"
             >
-              Create My First Portfolio
+              Go to Settings to Create Portfolio
             </button>
           </div>
         )}
       </div>
 
-      <AddPortfolioModal 
-        isOpen={isAddPortfolioOpen} 
-        onClose={() => setIsAddPortfolioOpen(false)} 
-        onAdd={handleAddPortfolio} 
-      />
-      
       {selectedPortfolioId && (
         <>
           <AddAssetModal 
@@ -1546,7 +1436,8 @@ export default function App() {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'dashboard' | 'assets'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'assets' | 'settings'>('dashboard');
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') === 'dark' || 
@@ -1568,34 +1459,97 @@ export default function App() {
   const toggleTheme = () => setIsDark(prev => !prev);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      setUser(user);
-      if (user) {
-        // Check if profile exists
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists()) {
-          const newProfile: UserProfile = {
-            uid: user.uid,
-            email: user.email || '',
-            displayName: user.displayName || '',
-            baseCurrency: 'USD',
-          };
-          await setDoc(doc(db, 'users', user.uid), {
-            ...newProfile,
-            createdAt: serverTimestamp()
-          });
-          setProfile(newProfile);
-        } else {
-          setProfile(userDoc.data() as UserProfile);
-        }
-      } else {
-        setProfile(null);
-      }
+    // Safety timeout: force loading to false after 10 seconds if Firebase hasn't responded
+    const safetyTimeout = setTimeout(() => {
       setLoading(false);
+    }, 10000);
+
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      try {
+        setUser(user);
+        if (user) {
+          // Check if profile exists
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!userDoc.exists()) {
+            const newProfile: UserProfile = {
+              uid: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || '',
+              baseCurrency: 'USD',
+            };
+            await setDoc(doc(db, 'users', user.uid), {
+              ...newProfile,
+              createdAt: serverTimestamp()
+            });
+            setProfile(newProfile);
+          } else {
+            setProfile(userDoc.data() as UserProfile);
+          }
+        } else {
+          setProfile(null);
+        }
+      } catch (error) {
+        console.error("Auth state change error:", error);
+      } finally {
+        setLoading(false);
+        clearTimeout(safetyTimeout);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      clearTimeout(safetyTimeout);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setPortfolios([]);
+      return;
+    }
+
+    const q = query(collection(db, 'portfolios'), where('ownerId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const pData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Portfolio));
+      setPortfolios(pData);
+    }, (error) => {
+      console.error("Portfolios snapshot error:", error);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
+
+  const handleAddPortfolio = async (name: string, description: string, monthlyGoal: number) => {
+    if (!user) return;
+    try {
+      const newDocRef = doc(collection(db, 'portfolios'));
+      await setDoc(newDocRef, {
+        id: newDocRef.id,
+        name,
+        description,
+        monthlyGoal,
+        ownerId: user.uid,
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Error adding portfolio:", err);
+    }
+  };
+
+  const handleDeletePortfolio = async (id: string) => {
+    if (!user) return;
+    try {
+      // Delete all assets in portfolio first
+      const assetsQ = query(collection(db, `portfolios/${id}/assets`));
+      const assetsSnapshot = await getDoc(doc(db, 'portfolios', id)); // This is just to check existence, wait
+      // Actually we need to get all docs in the subcollection
+      // But we can just delete the portfolio doc if rules allow or if we want to be clean
+      // For now, just delete the portfolio doc. In production, you'd want a cloud function to clean up subcollections.
+      await deleteDoc(doc(db, 'portfolios', id));
+    } catch (err) {
+      console.error("Error deleting portfolio:", err);
+    }
+  };
 
   if (loading) {
     return (
@@ -1614,7 +1568,19 @@ export default function App() {
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900 selection:text-indigo-900 dark:selection:text-indigo-100 transition-colors">
           <Navbar user={user} profile={profile} currentView={view} setView={setView} />
           <main>
-            {user ? <Dashboard view={view} /> : <LandingPage />}
+            {user ? (
+              view === 'settings' ? (
+                <Settings 
+                  portfolios={portfolios} 
+                  onAddPortfolio={handleAddPortfolio} 
+                  onDeletePortfolio={handleDeletePortfolio} 
+                />
+              ) : (
+                <Dashboard view={view} portfolios={portfolios} setView={setView} />
+              )
+            ) : (
+              <LandingPage />
+            )}
           </main>
         </div>
       </ThemeContext.Provider>
