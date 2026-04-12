@@ -1,20 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
+import { Portfolio } from '../../types';
 
-interface AddPortfolioModalProps {
+interface EditPortfolioModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (name: string, desc: string, goal: number, birthDate?: string, besEntryDate?: string) => void;
+  onEdit: (id: string, updates: Partial<Portfolio>) => void;
+  portfolio: Portfolio | null;
 }
 
-export function AddPortfolioModal({ isOpen, onClose, onAdd }: AddPortfolioModalProps) {
+export function EditPortfolioModal({ isOpen, onClose, onEdit, portfolio }: EditPortfolioModalProps) {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [goal, setGoal] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [besEntryDate, setBesEntryDate] = useState('');
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (portfolio) {
+      setName(portfolio.name);
+      setDesc(portfolio.description || '');
+      setGoal(portfolio.monthlyGoal?.toString() || '');
+      setBirthDate(portfolio.birthDate || '');
+      setBesEntryDate(portfolio.besEntryDate || '');
+    }
+  }, [portfolio]);
+
+  if (!isOpen || !portfolio) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -23,7 +35,7 @@ export function AddPortfolioModal({ isOpen, onClose, onAdd }: AddPortfolioModalP
         animate={{ opacity: 1, scale: 1 }}
         className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-xl border border-slate-200 dark:border-slate-800 transition-colors"
       >
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Create New Portfolio</h3>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Edit Portfolio</h3>
         <div className="space-y-4 max-h-[70vh] overflow-y-auto px-1">
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Portfolio Name</label>
@@ -84,18 +96,19 @@ export function AddPortfolioModal({ isOpen, onClose, onAdd }: AddPortfolioModalP
           </button>
           <button 
             onClick={() => {
-              onAdd(name, desc, parseFloat(goal) || 0, birthDate, besEntryDate);
-              setName('');
-              setDesc('');
-              setGoal('');
-              setBirthDate('');
-              setBesEntryDate('');
+              onEdit(portfolio.id, {
+                name,
+                description: desc,
+                monthlyGoal: parseFloat(goal) || 0,
+                birthDate: birthDate || null as any,
+                besEntryDate: besEntryDate || null as any
+              });
               onClose();
             }}
             disabled={!name.trim()}
             className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
           >
-            Create
+            Save Changes
           </button>
         </div>
       </motion.div>

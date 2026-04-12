@@ -97,9 +97,14 @@ service cloud.firestore {
              data.quantity is number && data.quantity > 0 &&
              data.purchasePrice is number && data.purchasePrice >= 0 &&
              data.purchaseCurrency in ['USD'] &&
-             (!('type' in data) || data.type in ['Stock', 'Crypto', 'Commodity', 'Cash', 'Fund']) &&
+             (!('type' in data) || data.type in ['Stock', 'Crypto', 'Commodity', 'Cash', 'Fund', 'GovernmentContribution']) &&
+             (!('tefasType' in data) || (data.tefasType == null || data.tefasType in ['YAT', 'EMK', 'BYF'])) &&
              (!('dividendYield' in data) || (data.dividendYield == null || data.dividendYield is number)) &&
+             (!('dividendGrowth5Y' in data) || (data.dividendGrowth5Y == null || data.dividendGrowth5Y is number)) &&
+             (!('dividendGrowth10Y' in data) || (data.dividendGrowth10Y == null || data.dividendGrowth10Y is number)) &&
              (!('currentPrice' in data) || (data.currentPrice == null || data.currentPrice is number)) &&
+             (!('name' in data) || (data.name is string && data.name.size() <= 100)) &&
+             (!('id' in data) || (data.id is string)) &&
              isValidTimestamp(data.createdAt);
     }
 
@@ -133,6 +138,11 @@ service cloud.firestore {
                     request.resource.data.ownerId == resource.data.ownerId &&
                     request.resource.data.createdAt == resource.data.createdAt;
       allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /fund_prices/{symbol} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Only backend (admin) can write
     }
 
     // Default deny

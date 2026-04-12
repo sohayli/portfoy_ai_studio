@@ -39,7 +39,12 @@
         "quantity": { "type": "number" },
         "purchasePrice": { "type": "number", "description": "Price at time of purchase" },
         "purchaseCurrency": { "type": "string", "enum": ["USD"] },
-        "type": { "type": "string", "enum": ["Stock", "Crypto", "Commodity", "Cash"] },
+        "type": { "type": "string", "enum": ["Stock", "Crypto", "Commodity", "Cash", "Fund", "GovernmentContribution"] },
+        "tefasType": { "type": "string", "enum": ["YAT", "EMK", "BYF"] },
+        "dividendYield": { "type": "number" },
+        "dividendGrowth5Y": { "type": "number" },
+        "dividendGrowth10Y": { "type": "number" },
+        "currentPrice": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["portfolioId", "ownerId", "symbol", "quantity", "purchasePrice", "purchaseCurrency"]

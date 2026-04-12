@@ -8,26 +8,34 @@ import {
   Settings as SettingsIcon,
   Shield,
   Bell,
-  Database
+  Database,
+  TrendingUp,
+  Pencil
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Portfolio } from '../types';
+import { Portfolio, UserProfile } from '../types';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { cn, formatCurrency } from '../lib/utils';
 import { AddPortfolioModal } from './modals/AddPortfolioModal';
+import { EditPortfolioModal } from './modals/EditPortfolioModal';
 
 interface SettingsProps {
+  profile: UserProfile | null;
+  onUpdateProfile: (updates: Partial<UserProfile>) => void;
   portfolios: Portfolio[];
-  onAddPortfolio: (name: string, desc: string, goal: number) => void;
+  onAddPortfolio: (name: string, desc: string, goal: number, birthDate?: string, besEntryDate?: string) => void;
+  onUpdatePortfolio: (id: string, updates: Partial<Portfolio>) => void;
   onDeletePortfolio: (id: string) => void;
 }
 
 type SettingsTab = 'portfolios' | 'profile' | 'security' | 'notifications' | 'data';
 
-export function Settings({ portfolios, onAddPortfolio, onDeletePortfolio }: SettingsProps) {
+export function Settings({ profile, onUpdateProfile, portfolios, onAddPortfolio, onUpdatePortfolio, onDeletePortfolio }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('portfolios');
   const [isAddPortfolioOpen, setIsAddPortfolioOpen] = useState(false);
+  const [isEditPortfolioOpen, setIsEditPortfolioOpen] = useState(false);
+  const [editingPortfolio, setEditingPortfolio] = useState<Portfolio | null>(null);
 
   const tabs: { id: SettingsTab; label: string; icon: any }[] = [
     { id: 'portfolios', label: 'Portfolios', icon: Wallet },
@@ -112,6 +120,16 @@ export function Settings({ portfolios, onAddPortfolio, onDeletePortfolio }: Sett
                         </div>
                         <div className="flex items-center gap-2">
                           <Button 
+                            variant="secondary" 
+                            size="icon"
+                            onClick={() => {
+                              setEditingPortfolio(portfolio);
+                              setIsEditPortfolioOpen(true);
+                            }}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button 
                             variant="danger" 
                             size="icon"
                             onClick={() => {
@@ -140,7 +158,73 @@ export function Settings({ portfolios, onAddPortfolio, onDeletePortfolio }: Sett
                 </div>
               )}
 
-              {activeTab !== 'portfolios' && (
+              {activeTab === 'profile' && profile && (
+                <div className="space-y-8">
+                  <div>
+                    <h3 className="text-2xl font-bold text-slate-900 dark:text-white">User Profile</h3>
+                    <p className="text-slate-500 dark:text-slate-400 mt-1">Manage your personal information and BES settings.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Card className="p-6 space-y-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <UserIcon className="w-5 h-5 text-indigo-600" />
+                        <h4 className="font-bold text-slate-900 dark:text-white">Personal Info</h4>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Display Name</label>
+                        <input 
+                          type="text"
+                          value={profile.displayName}
+                          onChange={(e) => onUpdateProfile({ displayName: e.target.value })}
+                          className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email</label>
+                        <input 
+                          type="email"
+                          value={profile.email}
+                          disabled
+                          className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 cursor-not-allowed"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Birth Date</label>
+                        <input 
+                          type="date"
+                          value={profile.birthDate || ''}
+                          onChange={(e) => onUpdateProfile({ birthDate: e.target.value })}
+                          className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                        />
+                      </div>
+                    </Card>
+
+                    <Card className="p-6 space-y-4 border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <TrendingUp className="w-5 h-5 text-indigo-600" />
+                        <h4 className="font-bold text-slate-900 dark:text-white">BES (Devlet Katkısı) Bilgisi</h4>
+                      </div>
+                      <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 space-y-2">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
+                          Devlet katkısı hakediş hesaplamaları artık her portföy için özel olarak yapılmaktadır. 
+                          Portföy ayarlarından doğum tarihi ve sisteme giriş tarihini güncelleyebilirsiniz.
+                        </p>
+                        <h5 className="text-xs font-bold text-indigo-600 uppercase tracking-wider mt-4">Vesting Rules (Hakediş)</h5>
+                        <ul className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1">
+                          <li>• 0-3 years: 0%</li>
+                          <li>• 3-6 years: 15%</li>
+                          <li>• 6-10 years: 35%</li>
+                          <li>• 10+ years: 60%</li>
+                          <li>• 10+ years & Age 56+: 100%</li>
+                        </ul>
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+              )}
+
+              {activeTab !== 'portfolios' && activeTab !== 'profile' && (
                 <div className="text-center py-24 bg-white dark:bg-slate-900 rounded-[3rem] border border-slate-200 dark:border-slate-800">
                   <SettingsIcon className="w-16 h-16 text-slate-200 dark:text-slate-800 mx-auto mb-4" />
                   <h3 className="text-xl font-bold text-slate-900 dark:text-white">Coming Soon</h3>
@@ -156,6 +240,16 @@ export function Settings({ portfolios, onAddPortfolio, onDeletePortfolio }: Sett
         isOpen={isAddPortfolioOpen} 
         onClose={() => setIsAddPortfolioOpen(false)} 
         onAdd={onAddPortfolio} 
+      />
+
+      <EditPortfolioModal
+        isOpen={isEditPortfolioOpen}
+        onClose={() => {
+          setIsEditPortfolioOpen(false);
+          setEditingPortfolio(null);
+        }}
+        onEdit={onUpdatePortfolio}
+        portfolio={editingPortfolio}
       />
     </div>
   );

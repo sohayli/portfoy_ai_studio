@@ -8,7 +8,13 @@ export const fetchStockPrice = async (symbol: string): Promise<{
   dividendGrowth10Y?: number 
 } | null> => {
   try {
-    const response = await fetch(`/api/price/stock/${encodeURIComponent(symbol)}`);
+    const response = await fetch(`/api/price/stock/${encodeURIComponent(symbol)}?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'No error body');
       throw new Error(`Failed to fetch stock price: ${response.status} ${errorText}`);
@@ -27,7 +33,13 @@ export const fetchStockPrice = async (symbol: string): Promise<{
 
 export const fetchCryptoPrice = async (symbol: string): Promise<number | null> => {
   try {
-    const response = await fetch(`/api/price/crypto/${encodeURIComponent(symbol)}`);
+    const response = await fetch(`/api/price/crypto/${encodeURIComponent(symbol)}?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
     if (!response.ok) throw new Error(`Failed to fetch crypto price: ${response.status}`);
     const data = await response.json();
     return data.price;
@@ -48,7 +60,13 @@ export const fetchTefasPrice = async (symbol: string, type: Asset['tefasType']):
         delay *= 2; // Exponential backoff
       }
 
-      const response = await fetch(`/api/price/tefas/${encodeURIComponent(symbol)}?type=${type || ''}`);
+      const response = await fetch(`/api/price/tefas/${encodeURIComponent(symbol)}?type=${type || ''}&t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'No error body');

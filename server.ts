@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getStockPrice, getCryptoPrice, getTefasPrice } from "./services/finance";
+import { getStockPrice, getCryptoPrice, getTefasPrice, syncAllTefasPrices } from "./services/finance.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,6 +62,17 @@ async function startServer() {
     }
   });
 
+  app.get("/api/tefas/sync", async (req, res) => {
+    try {
+      console.log("[API] Starting TEFAS sync...");
+      const result = await syncAllTefasPrices();
+      res.json(result);
+    } catch (error) {
+      console.error("[API] TEFAS sync failed:", error);
+      res.status(500).json({ error: "Sync failed" });
+    }
+  });
+
   // Catch-all for /api to ensure JSON response
   app.all("/api/*", (req, res) => {
     res.status(404).json({ error: `API route not found: ${req.originalUrl}` });
@@ -85,6 +96,12 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);
     console.log(`[SERVER] NODE_ENV: ${process.env.NODE_ENV}`);
+    
+    // Initial sync
+    setTimeout(() => {
+      console.log("[SERVER] Triggering initial TEFAS sync...");
+      syncAllTefasPrices().catch(err => console.error("[SERVER] Initial sync failed:", err));
+    }, 5000);
   });
 }
 

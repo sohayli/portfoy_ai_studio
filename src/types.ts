@@ -3,6 +3,8 @@ export interface UserProfile {
   email: string;
   displayName: string;
   baseCurrency: 'USD';
+  birthDate?: string; // ISO format
+  besEntryDate?: string; // ISO format
 }
 
 export interface Portfolio {
@@ -12,6 +14,8 @@ export interface Portfolio {
   ownerId: string;
   createdAt: any;
   monthlyGoal?: number;
+  birthDate?: string; // ISO format
+  besEntryDate?: string; // ISO format
 }
 
 export interface Asset {

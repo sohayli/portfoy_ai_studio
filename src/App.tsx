@@ -44,7 +44,9 @@ import {
   Search,
   Filter,
   Download,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Check,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -55,6 +57,8 @@ import { Card } from './components/ui/Card';
 import { Treemap } from './components/dashboard/Treemap';
 import { Navbar } from './components/Navbar';
 import { Settings } from './components/Settings';
+import { GovernmentContributionView } from './components/GovernmentContributionView';
+import { PassiveIncomeView } from './components/PassiveIncomeView';
 import { AddPortfolioModal } from './components/modals/AddPortfolioModal';
 
 // --- Constants ---
@@ -105,9 +109,21 @@ function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClos
             const category = getVal(['Category']).toLowerCase();
             
             let type: Asset['type'] = 'Stock';
-            if (category.includes('crypto')) type = 'Crypto';
-            else if (category.includes('commodity') || category.includes('gold')) type = 'Commodity';
-            else if (category.includes('cash')) type = 'Cash';
+            let tefasType: Asset['tefasType'] = undefined;
+
+            if (category.includes('crypto')) {
+              type = 'Crypto';
+            } else if (category.includes('commodity') || category.includes('gold')) {
+              type = 'Commodity';
+            } else if (category.includes('cash')) {
+              type = 'Cash';
+            } else if (category.includes('bes') || category.includes('katkı') || category.includes('devlet')) {
+              type = 'GovernmentContribution';
+              tefasType = 'EMK';
+            } else if (category.includes('fund') || category.includes('fon')) {
+              type = 'Fund';
+              tefasType = 'YAT'; // Default for funds
+            }
 
             const purchasePrice = shares > 0 ? costBasis / shares : 0;
             const dividendYield = parseFloat(getVal(['Dividend Yield', 'Yield', 'Temettü', 'Verim']).replace(/%/g, '').replace(/,/g, '')) / 100 || 0;
@@ -119,6 +135,7 @@ function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClos
               purchasePrice: purchasePrice,
               purchaseCurrency: 'USD' as const,
               type: type,
+              tefasType: tefasType,
               dividendYield: dividendYield > 0 ? dividendYield : undefined
             };
           }).filter(asset => asset.quantity > 0);
@@ -304,7 +321,11 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
             setPrice(fetchedPrice.toString());
           } else {
             setCurrentPrice(null);
-            setFetchError('Price not found. Check symbol and type.');
+            if (type === 'Fund' || type === 'GovernmentContribution') {
+              setFetchError('TEFAS API is currently blocking the server. Please enter the price manually.');
+            } else {
+              setFetchError('Price not found. Check symbol and type.');
+            }
           }
         } catch (e) {
           setFetchError('Failed to fetch price.');
@@ -346,6 +367,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value.toUpperCase())}
                 placeholder="AAPL, BTC..."
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -389,6 +411,15 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
             </div>
           )}
 
+          {type === 'GovernmentContribution' && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-xl">
+              <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">Info</p>
+              <p className="text-xs text-rose-600 dark:text-rose-400">
+                Devlet Katkısı fonları TEFAS üzerinde "Emeklilik" (EMK) kategorisinde sorgulanır. Sistem bunu otomatik olarak yapacaktır.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Quantity</label>
@@ -397,6 +428,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder="0.00"
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -420,6 +452,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 placeholder="0.00"
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -436,6 +469,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
                 value={dividendYield}
                 onChange={(e) => setDividendYield(e.target.value)}
                 placeholder="e.g. 4.5"
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -538,7 +572,11 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
             setPrice(fetchedPrice.toString());
           } else {
             setCurrentPrice(null);
-            setFetchError('Price not found. Check symbol and type.');
+            if (type === 'Fund' || type === 'GovernmentContribution') {
+              setFetchError('TEFAS API is currently blocking the server. Please enter the price manually.');
+            } else {
+              setFetchError('Price not found. Check symbol and type.');
+            }
           }
         } catch (e) {
           setFetchError('Failed to fetch price.');
@@ -577,6 +615,7 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value.toUpperCase())}
                 placeholder="AAPL, BTC..."
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -620,6 +659,15 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
             </div>
           )}
 
+          {type === 'GovernmentContribution' && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-xl">
+              <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">Info</p>
+              <p className="text-xs text-rose-600 dark:text-rose-400">
+                Devlet Katkısı fonları TEFAS üzerinde "Emeklilik" (EMK) kategorisinde sorgulanır. Sistem bunu otomatik olarak yapacaktır.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Quantity</label>
@@ -628,6 +676,7 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder="0.00"
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -651,6 +700,7 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 placeholder="0.00"
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -667,6 +717,7 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
                 value={dividendYield}
                 onChange={(e) => setDividendYield(e.target.value)}
                 placeholder="e.g. 4.5"
+                autoComplete="off"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors"
               />
             </div>
@@ -755,6 +806,23 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
 
     return () => unsubscribe();
   }, [selectedPortfolioId, authContext?.user]);
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ success: boolean; count: number } | null>(null);
+
+  const handleSyncTefas = async () => {
+    setIsSyncing(true);
+    try {
+      const response = await fetch('/api/tefas/sync');
+      const result = await response.json();
+      setSyncResult(result);
+      setTimeout(() => setSyncResult(null), 5000);
+    } catch (error) {
+      console.error("Sync failed:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   useEffect(() => {
     if (assets.length === 0 || !selectedPortfolioId) return;
@@ -936,47 +1004,138 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
     if (!selectedPortfolioId || !authContext?.user) return;
     
     try {
-      const promises = importedAssets.map(asset => {
+      // Process imports in batches or sequence to fetch initial prices
+      for (const asset of importedAssets) {
         const newDocRef = doc(collection(db, `portfolios/${selectedPortfolioId}/assets`));
+        
+        let initialPrice: number | null = null;
+        let initialDividendYield = asset.dividendYield || null;
+        let initialDividendGrowth5Y = asset.dividendGrowth5Y || null;
+        let initialDividendGrowth10Y = asset.dividendGrowth10Y || null;
+
+        try {
+          if (asset.type === 'Stock') {
+            const res = await fetchStockPrice(asset.symbol);
+            if (res) {
+              initialPrice = res.price;
+              if (res.dividendYield !== undefined) initialDividendYield = res.dividendYield;
+              if (res.dividendGrowth5Y !== undefined) initialDividendGrowth5Y = res.dividendGrowth5Y;
+              if (res.dividendGrowth10Y !== undefined) initialDividendGrowth10Y = res.dividendGrowth10Y;
+            }
+          } else if (asset.type === 'Crypto') {
+            initialPrice = await fetchCryptoPrice(asset.symbol);
+          } else if (asset.type === 'Fund' || asset.type === 'GovernmentContribution') {
+            initialPrice = await fetchTefasPrice(asset.symbol, asset.type === 'GovernmentContribution' ? 'EMK' : asset.tefasType);
+          }
+        } catch (e) {
+          console.error(`Initial price fetch failed for ${asset.symbol}:`, e);
+        }
+
         const dataToSave = {
           ...asset,
+          currentPrice: initialPrice,
+          dividendYield: initialDividendYield,
+          dividendGrowth5Y: initialDividendGrowth5Y,
+          dividendGrowth10Y: initialDividendGrowth10Y,
           id: newDocRef.id,
           portfolioId: selectedPortfolioId,
           ownerId: authContext.user.uid,
           createdAt: serverTimestamp()
         };
 
-        // Remove undefined fields for Firestore compatibility
+        // Remove undefined fields
         Object.keys(dataToSave).forEach(key => {
           if ((dataToSave as any)[key] === undefined) {
             delete (dataToSave as any)[key];
           }
         });
 
-        return setDoc(newDocRef, dataToSave);
-      });
-      
-      await Promise.all(promises);
+        await setDoc(newDocRef, dataToSave);
+        // Small delay to avoid overwhelming the API during bulk import
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     } catch (err) {
       console.error("Error importing assets:", err);
     }
   };
 
+  const calculateVestingPercentage = (birthDate?: string, besEntryDate?: string) => {
+    if (!besEntryDate) return 0;
+
+    const now = new Date();
+    const entryDate = new Date(besEntryDate);
+    const yearsInSystem = (now.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+
+    let age = 0;
+    if (birthDate) {
+      const bDate = new Date(birthDate);
+      age = (now.getTime() - bDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    }
+
+    if (yearsInSystem >= 10 && age >= 56) return 100;
+    if (yearsInSystem >= 10) return 60;
+    if (yearsInSystem >= 6) return 35;
+    if (yearsInSystem >= 3) return 15;
+    return 0;
+  };
+
+  const vestingPercent = useMemo(() => {
+    return calculateVestingPercentage(authContext?.profile?.birthDate, authContext?.profile?.besEntryDate);
+  }, [authContext?.profile?.birthDate, authContext?.profile?.besEntryDate]);
+
+  const getAssetVestingPercent = (asset: Asset) => {
+    if (asset.type !== 'GovernmentContribution') return 100;
+    const p = portfolios.find(p => p.id === asset.portfolioId);
+    if (!p) return 0;
+    return calculateVestingPercentage(p.birthDate, p.besEntryDate);
+  };
+
   const calculateTotalValue = () => {
     return assets.reduce((total, asset) => {
-      return total + (asset.purchasePrice * asset.quantity);
+      const price = asset.currentPrice ?? asset.purchasePrice;
+      let value = price * asset.quantity;
+      
+      if (asset.type === 'GovernmentContribution') {
+        const vPercent = getAssetVestingPercent(asset);
+        value = value * (vPercent / 100);
+      }
+      
+      return total + value;
     }, 0);
   };
 
   const calculateAnnualDividends = () => {
     return assets.reduce((total, asset) => {
-      const price = asset.currentPrice || asset.purchasePrice;
+      const price = asset.currentPrice ?? asset.purchasePrice;
       const yield_ = asset.dividendYield || 0;
-      return total + (price * asset.quantity * yield_);
+      let value = price * asset.quantity * yield_;
+      
+      if (asset.type === 'GovernmentContribution') {
+        const vPercent = getAssetVestingPercent(asset);
+        value = value * (vPercent / 100);
+      }
+      
+      return total + value;
+    }, 0);
+  };
+
+  const calculateTotalCost = () => {
+    return assets.reduce((total, asset) => {
+      let value = asset.purchasePrice * asset.quantity;
+      
+      if (asset.type === 'GovernmentContribution') {
+        const vPercent = getAssetVestingPercent(asset);
+        value = value * (vPercent / 100);
+      }
+      
+      return total + value;
     }, 0);
   };
 
   const totalValue = calculateTotalValue();
+  const totalCost = calculateTotalCost();
+  const totalGainLoss = totalValue - totalCost;
+  const totalGainLossPercent = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
   const annualDividends = calculateAnnualDividends();
   const monthlyDividends = annualDividends / 12;
   
@@ -992,6 +1151,47 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
     asset.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const allocationData = useMemo(() => {
+    const totals = assets.reduce((acc: Record<string, number>, asset) => {
+      const price = asset.currentPrice ?? asset.purchasePrice;
+      let value = price * asset.quantity;
+      
+      if (asset.type === 'GovernmentContribution') {
+        const vPercent = getAssetVestingPercent(asset);
+        value = value * (vPercent / 100);
+      }
+      
+      const type = asset.type;
+      acc[type] = (acc[type] || 0) + value;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const typeLabels: Record<string, string> = {
+      'Stock': 'Stocks',
+      'Crypto': 'Crypto',
+      'Commodity': 'Commodities',
+      'Fund': 'Funds',
+      'GovernmentContribution': 'Devlet Katkısı',
+      'Cash': 'Cash'
+    };
+
+    const typeColors: Record<string, string> = {
+      'Stock': '#4f46e5',
+      'Crypto': '#f59e0b',
+      'Commodity': '#10b981',
+      'Fund': '#8b5cf6',
+      'GovernmentContribution': '#e11d48',
+      'Cash': '#64748b'
+    };
+
+    return Object.entries(totals).map(([type, value]: [string, number]) => ({
+      name: typeLabels[type] || type,
+      value,
+      percentage: (totalValue as number) > 0 ? (value / (totalValue as number)) * 100 : 0,
+      color: typeColors[type] || '#94a3b8'
+    })).sort((a, b) => (b.value as number) - (a.value as number));
+  }, [assets, totalValue]);
+
   const treemapData = useMemo(() => {
     interface AggregatedAsset {
       symbol: string;
@@ -1000,8 +1200,15 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
     }
     const aggregated = assets.reduce((acc: Record<string, AggregatedAsset>, asset) => {
       const symbol = asset.symbol;
-      const currentValue = (asset.currentPrice || asset.purchasePrice) * asset.quantity;
-      const costValue = asset.purchasePrice * asset.quantity;
+      const price = asset.currentPrice ?? asset.purchasePrice;
+      let currentValue = price * asset.quantity;
+      let costValue = asset.purchasePrice * asset.quantity;
+
+      if (asset.type === 'GovernmentContribution') {
+        const vPercent = getAssetVestingPercent(asset);
+        currentValue = currentValue * (vPercent / 100);
+        costValue = costValue * (vPercent / 100);
+      }
 
       if (!acc[symbol]) {
         acc[symbol] = {
@@ -1056,6 +1263,21 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={handleSyncTefas}
+              disabled={isSyncing}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all",
+                isSyncing 
+                  ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                  : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-800/50"
+              )}
+              title="Sync all TEFAS fund prices to database"
+            >
+              <RefreshCw className={cn("w-4 h-4", isSyncing && "animate-spin")} />
+              <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync TEFAS'}</span>
+            </button>
+
             <div className="relative">
               <select
                 value={selectedPortfolioId || ''}
@@ -1072,12 +1294,45 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
           </div>
         </div>
 
+        {syncResult && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={cn(
+              "p-4 rounded-2xl border flex items-center justify-between",
+              syncResult.success 
+                ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400"
+                : "bg-rose-50 dark:bg-rose-900/20 border-rose-100 dark:border-rose-800 text-rose-700 dark:text-rose-400"
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "w-8 h-8 rounded-lg flex items-center justify-center",
+                syncResult.success ? "bg-emerald-100 dark:bg-emerald-800" : "bg-rose-100 dark:bg-rose-800"
+              )}>
+                {syncResult.success ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+              </div>
+              <div>
+                <p className="font-bold text-sm">{syncResult.success ? 'Sync Successful' : 'Sync Failed'}</p>
+                <p className="text-xs opacity-80">
+                  {syncResult.success 
+                    ? `Successfully updated ${syncResult.count} fund prices in the database.`
+                    : 'There was an error syncing prices from TEFAS.'}
+                </p>
+              </div>
+            </div>
+            <button onClick={() => setSyncResult(null)} className="p-1 hover:bg-black/5 rounded-lg transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+
         {selectedPortfolio ? (
           <>
             {view === 'dashboard' ? (
               <>
                 {/* Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                     <div className="flex items-center justify-between mb-4">
                       <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
@@ -1088,6 +1343,34 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
                     <p className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Value</p>
                     <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-1">{formatCurrency(totalValue)}</h3>
                     <p className="text-xs text-slate-400 mt-2">Converted to USD</p>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center",
+                        totalGainLoss >= 0 ? "bg-emerald-50 dark:bg-emerald-900/20" : "bg-rose-50 dark:bg-rose-900/20"
+                      )}>
+                        <ArrowUpRight className={cn(
+                          "w-5 h-5",
+                          totalGainLoss >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                        )} />
+                      </div>
+                      <span className={cn(
+                        "text-xs font-bold px-2 py-1 rounded-lg",
+                        totalGainLoss >= 0 ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" : "text-rose-600 bg-rose-50 dark:bg-rose-900/20"
+                      )}>
+                        {totalGainLoss >= 0 ? '+' : ''}{totalGainLossPercent.toFixed(2)}%
+                      </span>
+                    </div>
+                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Profit/Loss</p>
+                    <h3 className={cn(
+                      "text-3xl font-bold mt-1",
+                      totalGainLoss >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                    )}>
+                      {totalGainLoss >= 0 ? '+' : ''}{formatCurrency(totalGainLoss)}
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-2">Cost: {formatCurrency(totalCost)}</p>
                   </div>
 
                   <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
@@ -1121,8 +1404,47 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
                   </div>
                 </div>
 
-                {/* Treemap Visualization */}
-                <Treemap data={treemapData} />
+                {/* Allocation & Treemap */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-1 space-y-6">
+                    <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors h-full">
+                      <div className="flex items-center gap-2 mb-6">
+                        <PieChart className="w-5 h-5 text-indigo-600" />
+                        <h3 className="font-bold text-slate-900 dark:text-white">Asset Allocation</h3>
+                      </div>
+                      <div className="space-y-4">
+                        {allocationData.map((item) => (
+                          <div key={item.name} className="space-y-2">
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                                {item.name}
+                              </span>
+                              <span className="font-bold text-slate-900 dark:text-white">{item.percentage.toFixed(1)}%</span>
+                            </div>
+                            <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                              <div 
+                                className="h-full transition-all duration-1000" 
+                                style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
+                              />
+                            </div>
+                            <div className="text-[10px] text-slate-400 text-right">
+                              {formatCurrency(item.value)}
+                            </div>
+                          </div>
+                        ))}
+                        {allocationData.length === 0 && (
+                          <div className="h-40 flex items-center justify-center text-slate-400 italic text-sm">
+                            No data available
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="lg:col-span-2">
+                    <Treemap data={treemapData} />
+                  </div>
+                </div>
               </>
             ) : (
               /* Assets Table View */
@@ -1190,10 +1512,20 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
                     </thead>
                     <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                       {filteredAssets.map((asset) => {
-                        const costBasis = asset.purchasePrice * asset.quantity;
-                        const currentValue = (asset.currentPrice || asset.purchasePrice) * asset.quantity;
-                        const gainLoss = asset.currentPrice ? (asset.currentPrice - asset.purchasePrice) * asset.quantity : 0;
-                        const gainLossPercent = asset.currentPrice ? ((asset.currentPrice - asset.purchasePrice) / asset.purchasePrice) * 100 : 0;
+                        const costBasisRaw = asset.purchasePrice * asset.quantity;
+                        const currentValueRaw = (asset.currentPrice ?? asset.purchasePrice) * asset.quantity;
+                        
+                        let costBasis = costBasisRaw;
+                        let currentValue = currentValueRaw;
+                        
+                        const vPercent = getAssetVestingPercent(asset);
+                        if (asset.type === 'GovernmentContribution') {
+                          costBasis = costBasisRaw * (vPercent / 100);
+                          currentValue = currentValueRaw * (vPercent / 100);
+                        }
+
+                        const gainLoss = (asset.currentPrice !== undefined && asset.currentPrice !== null) ? currentValue - costBasis : 0;
+                        const gainLossPercent = (asset.currentPrice !== undefined && asset.currentPrice !== null) ? ((currentValue - costBasis) / costBasis) * 100 : 0;
 
                         return (
                           <tr key={asset.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors group">
@@ -1216,6 +1548,11 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
                                 )}>
                                   {asset.type === 'GovernmentContribution' ? 'Devlet Katkısı' : asset.type}
                                 </span>
+                                {asset.type === 'GovernmentContribution' && (
+                                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">
+                                    Vested: {getAssetVestingPercent(asset)}%
+                                  </span>
+                                )}
                                 {(asset.type === 'Fund' || asset.type === 'GovernmentContribution') && (asset.tefasType || asset.type === 'GovernmentContribution') && (
                                   <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 ml-1">
                                     ({(asset.type === 'GovernmentContribution' || asset.tefasType === 'EMK') ? 'Emeklilik' : asset.tefasType === 'YAT' ? 'Yatırım' : 'BYF'})
@@ -1436,7 +1773,7 @@ export default function App() {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'dashboard' | 'assets' | 'settings'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'assets' | 'settings' | 'bes' | 'passive-income'>('dashboard');
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1519,7 +1856,7 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  const handleAddPortfolio = async (name: string, description: string, monthlyGoal: number) => {
+  const handleAddPortfolio = async (name: string, description: string, monthlyGoal: number, birthDate?: string, besEntryDate?: string) => {
     if (!user) return;
     try {
       const newDocRef = doc(collection(db, 'portfolios'));
@@ -1528,11 +1865,22 @@ export default function App() {
         name,
         description,
         monthlyGoal,
+        birthDate: birthDate || null,
+        besEntryDate: besEntryDate || null,
         ownerId: user.uid,
         createdAt: serverTimestamp()
       });
     } catch (err) {
       console.error("Error adding portfolio:", err);
+    }
+  };
+
+  const handleUpdatePortfolio = async (id: string, updates: Partial<Portfolio>) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'portfolios', id), updates, { merge: true });
+    } catch (err) {
+      console.error("Error updating portfolio:", err);
     }
   };
 
@@ -1548,6 +1896,16 @@ export default function App() {
       await deleteDoc(doc(db, 'portfolios', id));
     } catch (err) {
       console.error("Error deleting portfolio:", err);
+    }
+  };
+
+  const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
+      setProfile(prev => prev ? { ...prev, ...updates } : null);
+    } catch (err) {
+      console.error("Error updating profile:", err);
     }
   };
 
@@ -1571,9 +1929,21 @@ export default function App() {
             {user ? (
               view === 'settings' ? (
                 <Settings 
+                  profile={profile}
+                  onUpdateProfile={handleUpdateProfile}
                   portfolios={portfolios} 
                   onAddPortfolio={handleAddPortfolio} 
+                  onUpdatePortfolio={handleUpdatePortfolio}
                   onDeletePortfolio={handleDeletePortfolio} 
+                />
+              ) : view === 'bes' ? (
+                <GovernmentContributionView 
+                  portfolios={portfolios}
+                  onUpdatePortfolio={handleUpdatePortfolio}
+                />
+              ) : view === 'passive-income' ? (
+                <PassiveIncomeView 
+                  portfolios={portfolios}
                 />
               ) : (
                 <Dashboard view={view} portfolios={portfolios} setView={setView} />
