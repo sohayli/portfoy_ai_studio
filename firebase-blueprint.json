@@ -62,6 +62,21 @@
     "/portfolios/{portfolioId}/assets/{assetId}": {
       "schema": "Asset",
       "description": "Assets within a portfolio"
+    },
+    "/fund_prices/{symbol}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "symbol": { "type": "string" },
+          "price": { "type": "number" },
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "date": { "type": "string" },
+          "source": { "type": "string" }
+        }
+      },
+      "description": "Cached TEFAS fund prices"
     }
   }
 }

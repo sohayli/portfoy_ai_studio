@@ -2,7 +2,8 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getStockPrice, getCryptoPrice, getTefasPrice, syncAllTefasPrices } from "./services/finance.ts";
+import cron from "node-cron";
+import { getStockPrice, getCryptoPrice, getTefasPrice, syncAllTefasPrices, getUsdTryRate, getHistoricalPrices } from "./services/finance.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,15 +51,24 @@ async function startServer() {
 
   app.get("/api/price/tefas/:symbol", async (req, res) => {
     const { symbol } = req.params;
-    const type = (req.query.type as string) || 'YAT';
-    console.log(`[API] TEFAS request for: ${symbol} (${type})`);
+    console.log(`[API] TEFAS request for: ${symbol}`);
     
     try {
-      const price = await getTefasPrice(symbol, type);
+      const price = await getTefasPrice(symbol);
       res.json({ price });
     } catch (error) {
       console.error(`Error fetching TEFAS price for ${symbol}:`, error instanceof Error ? error.message : String(error));
       res.status(500).json({ error: "Failed to fetch TEFAS price" });
+    }
+  });
+
+  app.get("/api/history/:type/:symbol", async (req, res) => {
+    const { type, symbol } = req.params;
+    try {
+      const history = await getHistoricalPrices(symbol, type);
+      res.json({ history });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch history" });
     }
   });
 
@@ -69,7 +79,20 @@ async function startServer() {
       res.json(result);
     } catch (error) {
       console.error("[API] TEFAS sync failed:", error);
-      res.status(500).json({ error: "Sync failed" });
+      res.status(500).json({ error: "Sync failed", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/debug/firebase", async (req, res) => {
+    try {
+      const snapshot = await syncAllTefasPrices();
+      res.json({ status: "success", result: snapshot });
+    } catch (error) {
+      res.status(500).json({ 
+        status: "error", 
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   });
 
@@ -95,13 +118,32 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);
-    console.log(`[SERVER] NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`[SERVER] NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
     
+    // Health checks (non-blocking)
+    if (process.env.NODE_ENV !== "production") {
+      setTimeout(async () => {
+        console.log("[HEALTH CHECK] Testing APIs...");
+        try {
+          const rate = await getUsdTryRate();
+          console.log(`[HEALTH CHECK] USDTRY Rate: ${rate}`);
+        } catch (e) {
+          console.error("[HEALTH CHECK] Failed:", e);
+        }
+      }, 5000);
+    }
+
     // Initial sync
     setTimeout(() => {
       console.log("[SERVER] Triggering initial TEFAS sync...");
       syncAllTefasPrices().catch(err => console.error("[SERVER] Initial sync failed:", err));
-    }, 5000);
+    }, 15000);
+
+    // Daily sync at 12:00
+    cron.schedule("0 12 * * *", () => {
+      console.log("[CRON] Running daily TEFAS sync at 12:00...");
+      syncAllTefasPrices().catch(err => console.error("[CRON] Daily sync failed:", err));
+    });
   });
 }
 

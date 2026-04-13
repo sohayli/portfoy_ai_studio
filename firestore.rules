@@ -141,7 +141,7 @@ service cloud.firestore {
     }
 
     match /fund_prices/{symbol} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if false; // Only backend (admin) can write
     }
 

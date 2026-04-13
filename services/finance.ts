@@ -1,52 +1,73 @@
 
 
 import admin from 'firebase-admin';
+import { getFirestore } from 'firebase-admin/firestore';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
 // Initialize Firebase Admin
-let db: admin.firestore.Firestore | null = null;
+let db: any = null;
 try {
   const configPath = join(process.cwd(), 'firebase-applet-config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   
   if (!admin.apps.length) {
     admin.initializeApp({
-      projectId: config.projectId,
+      projectId: config.projectId
     });
   }
-  db = admin.firestore();
-  if (config.firestoreDatabaseId) {
-    db = admin.firestore(config.firestoreDatabaseId);
-  }
+  
+  // Use getFirestore(databaseId) for named databases, or getFirestore() for default
+  db = config.firestoreDatabaseId ? getFirestore(config.firestoreDatabaseId) : getFirestore();
+  console.log(`[FIREBASE] Admin initialized. Database ID: ${config.firestoreDatabaseId || '(default)'}`);
 } catch (e) {
   console.error('[FIREBASE] Failed to initialize admin:', e);
 }
 
+let cachedUsdTryRate: number | null = null;
+let lastUsdTryFetchTime = 0;
+const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+
 export async function getUsdTryRate() {
+  const now = Date.now();
+  if (cachedUsdTryRate && (now - lastUsdTryFetchTime < CACHE_DURATION)) {
+    return cachedUsdTryRate;
+  }
+
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    
     const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/USDTRY=X`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0'
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeout);
     if (!response.ok) {
       console.warn(`[USDTRY] Failed to fetch rate, status: ${response.status}. Using fallback 32.5`);
-      return 32.5;
+      return cachedUsdTryRate || 32.5;
     }
     const data: any = await response.json();
-    const rate = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    const meta = data?.chart?.result?.[0]?.meta;
+    const rate = meta?.regularMarketPrice || meta?.previousClose || meta?.price;
+    
     if (typeof rate !== 'number' || rate <= 0) {
-      console.warn(`[USDTRY] Invalid rate received: ${rate}. Using fallback 32.5`);
-      return 32.5;
+      console.warn(`[USDTRY] Invalid rate received: ${rate}. Meta: ${JSON.stringify(meta)}. Using fallback 32.5`);
+      return cachedUsdTryRate || 32.5;
     }
+    
+    cachedUsdTryRate = rate;
+    lastUsdTryFetchTime = now;
+    console.log(`[USDTRY] Current rate updated: ${rate}`);
     return rate;
   } catch (e) {
     console.error(`[USDTRY] Error fetching rate:`, e instanceof Error ? e.message : e);
-    return 32.5; // Fallback
+    return cachedUsdTryRate || 32.5; // Fallback to last known or default
   }
 }
 
@@ -61,22 +82,28 @@ export async function getStockPrice(symbol: string) {
 
   const fetchSingle = async (s: string) => {
     const endpoints = [
-      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(s)}`,
-      `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(s)}`,
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1mo&range=10y&events=div`,
-      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1mo&range=10y&events=div`
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1mo&range=10y&events=div`,
+      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(s)}`,
+      `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(s)}`
     ];
 
     for (const url of endpoints) {
       try {
+        console.log(`[STOCK] Fetching ${s} from ${url}`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        
         const response = await fetch(url, { 
           headers: {
             ...headers,
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0'
-          }
+          },
+          signal: controller.signal
         });
+        clearTimeout(timeout);
         
         if (!response.ok) {
           console.warn(`[STOCK] ${s} fetch failed from ${url}: ${response.status}`);
@@ -84,6 +111,7 @@ export async function getStockPrice(symbol: string) {
         }
 
         const data: any = await response.json();
+        console.log(`[STOCK] ${s} data received from ${url}`);
         
         // Handle quote API response
         if (url.includes('/quote')) {
@@ -201,7 +229,13 @@ export async function getCryptoPrice(symbol: string) {
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}USDT`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}USDT`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
       if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
       const data: any = await response.json();
       return { price: parseFloat(data.price) };
@@ -219,308 +253,169 @@ export async function getCryptoPrice(symbol: string) {
  * Consolidated here for simplicity as requested.
  */
 
-interface TefasSession {
-  cookie: string;
-  expiry: number;
-  userAgent: string;
-}
-
 class TefasClient {
-  private static sessions: Record<string, TefasSession> = {};
-  private static USER_AGENTS = [
-    {
-      ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      ch: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-      platform: '"Windows"'
-    },
-    {
-      ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-      ch: '"Chromium";v="123", "Google Chrome";v="123", "Not-A.Brand";v="99"',
-      platform: '"macOS"'
-    },
-    {
-      ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      ch: '"Chromium";v="122", "Google Chrome";v="122", "Not-A.Brand";v="99"',
-      platform: '"Linux"'
-    }
-  ];
+  private static API_KEY = 'tefas_7x9K2mP4qR8vN3wL6yT1cB5aD0fE';
 
-  private static getUAConfig() {
-    return this.USER_AGENTS[Math.floor(Math.random() * this.USER_AGENTS.length)];
-  }
-
-  private static async sleep(ms: number) {
-    const jitter = Math.floor(Math.random() * 2000); // Increased jitter
-    return new Promise(resolve => setTimeout(resolve, ms + jitter));
-  }
-
-  private static async getSession(domain: string, symbol: string, force: boolean = false): Promise<{ cookie: string; config: any }> {
-    const now = Date.now();
-    const sessionKey = `${domain}_${symbol.toUpperCase()}`;
-    
-    if (!force && this.sessions[sessionKey] && this.sessions[sessionKey].expiry > now) {
-      const config = this.USER_AGENTS.find(a => a.ua === this.sessions[sessionKey].userAgent) || this.USER_AGENTS[0];
-      return { cookie: this.sessions[sessionKey].cookie, config };
-    }
-
-    const config = this.getUAConfig();
+  private static async fetchFromProxy(symbols: string[]): Promise<any[]> {
+    const PROXY_URL = 'http://62.171.147.85:3000/api/tefas/batch';
     try {
-      const targetPage = `${domain}/FonAnaliz.aspx`;
-      const response = await fetch(targetPage, {
-        headers: {
-          'User-Agent': config.ua,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': config.ch,
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': config.platform,
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1'
-        }
-      });
-
-      let cookieHeader = '';
-      const rawCookie = response.headers.get('set-cookie');
-      if (rawCookie) {
-        cookieHeader = rawCookie.split(',').map(c => c.split(';')[0].trim()).join('; ');
+      // Global rate limiting: ensure at least 3 seconds between any proxy calls
+      const now = Date.now();
+      const timeSinceLastCall = now - (this.lastCallTime || 0);
+      if (timeSinceLastCall < 3000) {
+        await new Promise(resolve => setTimeout(resolve, 3000 - timeSinceLastCall));
       }
+      this.lastCallTime = Date.now();
 
-      if (cookieHeader) {
-        this.sessions[sessionKey] = {
-          cookie: cookieHeader,
-          expiry: now + 5 * 60 * 1000, // Even shorter expiry
-          userAgent: config.ua
-        };
-      }
-      return { cookie: cookieHeader, config };
-    } catch (e) {
-      return { cookie: '', config };
-    }
-  }
+      console.log(`[TEFAS PROXY] Fetching batch: ${symbols.join(',')}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      
+      const url = new URL(PROXY_URL);
+      url.searchParams.append('funds', symbols.join(','));
+      url.searchParams.append('apikey', this.API_KEY);
 
-  private static async request(domain: string, endpoint: string, body: string, symbol: string, attempt: number = 0): Promise<any> {
-    // Add initial delay even for first attempt to avoid burst
-    if (attempt === 0) {
-      await this.sleep(1000 + Math.random() * 2000);
-    }
-
-    const { cookie, config } = await this.getSession(domain, symbol, attempt > 0);
-    
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-
-    try {
-      const response = await fetch(`${domain}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'User-Agent': config.ua,
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Origin': domain,
-          'Referer': `${domain}/FonAnaliz.aspx`,
-          'Connection': 'keep-alive',
-          'Cache-Control': 'no-cache',
-          'Sec-Ch-Ua': config.ch,
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': config.platform,
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'same-origin',
-          ...(cookie ? { 'Cookie': cookie } : {})
-        },
-        body: body,
+      const response = await fetch(url.toString(), {
+        method: 'GET',
         signal: controller.signal
       });
-
+      
       clearTimeout(timeout);
-
       if (!response.ok) {
-        if (response.status === 403 || response.status === 405) {
-          const sessionKey = `${domain}_${symbol.toUpperCase()}`;
-          delete this.sessions[sessionKey];
-          throw new Error(`WAF Block (HTTP ${response.status})`);
-        }
-        throw new Error(`HTTP ${response.status}`);
+        console.warn(`[TEFAS PROXY] Proxy returned HTTP ${response.status}`);
+        throw new Error(`Proxy HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      
+      let results: any[] = [];
+      if (Array.isArray(data)) {
+        results = data;
+      } else if (data && Array.isArray(data.funds)) {
+        results = data.funds;
+      } else if (data && data.success === false) {
+        console.warn(`[TEFAS PROXY] Proxy reported failure: ${data.error || 'Unknown error'}`);
       }
 
-      const text = await response.text();
-      if (text.includes('Request Rejected') || text.includes('WAF')) {
-        const sessionKey = `${domain}_${symbol.toUpperCase()}`;
-        delete this.sessions[sessionKey];
-        throw new Error('Request Rejected by WAF');
-      }
-
-      try {
-        return JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Invalid JSON response from ${domain}`);
-      }
+      console.log(`[TEFAS PROXY] Received ${results.length} items`);
+      return results;
     } catch (e) {
-      clearTimeout(timeout);
-      throw e;
+      console.error(`[TEFAS PROXY] Error:`, e instanceof Error ? e.message : e);
+      return [];
     }
   }
+
+  private static lastCallTime = 0;
+  private static isSyncing = false;
 
   public static async syncAllPrices(): Promise<{ success: boolean; count: number }> {
     if (!db) return { success: false, count: 0 };
-
-    const fundTypes = ['YAT', 'EMK', 'BYF'];
-    let totalSynced = 0;
-
-    for (const type of fundTypes) {
-      try {
-        await this.sleep(3000); // Delay between types to avoid WAF
-        console.log(`[TEFAS SYNC] Syncing type: ${type}`);
-        const payload = new URLSearchParams({
-          'fontip': type,
-          'siralama': 'GETIRI_1Y',
-          'yon': 'DESC'
-        });
-
-        const result = await this.request('https://www.tefas.gov.tr', '/api/DB/BindComparisonFundReturns', payload.toString(), 'SYNC', 0);
-        
-        if (result.data && Array.isArray(result.data)) {
-          const batch = db.batch();
-          let batchCount = 0;
-
-          for (const fund of result.data) {
-            const symbol = (fund.FONKODU || fund.FONKOD || '').toString().toUpperCase();
-            const price = parseFloat(fund.FIYAT?.toString().replace(',', '.') || '0');
-            const name = fund.FONUNVAN || fund.FONADI || '';
-
-            if (symbol && price > 0) {
-              const docRef = db.collection('fund_prices').doc(symbol);
-              batch.set(docRef, {
-                symbol,
-                price,
-                name,
-                type,
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                date: fund.TARIH || new Date().toLocaleDateString('tr-TR')
-              }, { merge: true });
-              
-              batchCount++;
-              totalSynced++;
-
-              if (batchCount >= 400) {
-                await batch.commit();
-                batchCount = 0;
-              }
-            }
-          }
-
-          if (batchCount > 0) {
-            await batch.commit();
-          }
-          console.log(`[TEFAS SYNC] Synced ${totalSynced} funds for type ${type}`);
-        }
-      } catch (e) {
-        console.error(`[TEFAS SYNC] Error syncing type ${type}:`, e);
-      }
+    if (this.isSyncing) {
+      console.log('[TEFAS SYNC] Sync already in progress, skipping.');
+      return { success: false, count: 0 };
     }
+    
+    try {
+      this.isSyncing = true;
+      console.log('[TEFAS SYNC] Starting background sync...');
+      
+      // 1. Discover all symbols from fund_prices AND all user portfolios
+      const symbolsSet = new Set<string>();
+      
+      // From fund_prices
+      const priceSnapshot = await db.collection('fund_prices').get();
+      priceSnapshot.docs.forEach((doc: any) => symbolsSet.add(doc.id.toUpperCase()));
+      
+      // From all portfolios (using collectionGroup to find all assets)
+      try {
+        const assetsSnapshot = await db.collectionGroup('assets').get();
+        assetsSnapshot.docs.forEach((doc: any) => {
+          const data = doc.data();
+          if (data && ['Fund', 'GovernmentContribution'].includes(data.type)) {
+            const symbol = data.symbol;
+            if (symbol) symbolsSet.add(symbol.toUpperCase());
+          }
+        });
+      } catch (e) {
+        console.warn('[TEFAS SYNC] Failed to discover symbols from portfolios:', e);
+      }
 
-    return { success: true, count: totalSynced };
+      const symbols = Array.from(symbolsSet);
+      console.log(`[TEFAS SYNC] Discovered ${symbols.length} unique symbols to sync.`);
+      
+      if (symbols.length === 0) {
+        return { success: true, count: 0 };
+      }
+
+      // 2. Fetch in batches
+      const batchSize = 20;
+      let totalUpdated = 0;
+
+      for (let i = 0; i < symbols.length; i += batchSize) {
+        const batchSymbols = symbols.slice(i, i + batchSize);
+        const results = await this.fetchFromProxy(batchSymbols);
+        
+        const firestoreBatch = db.batch();
+        let batchCount = 0;
+
+        for (const item of results) {
+          const symbol = (item.code || item.symbol || '').toString().toUpperCase();
+          const price = parseFloat(item.price?.toString().replace(',', '.') || '0');
+          
+          if (symbol && price > 0) {
+            const docRef = db.collection('fund_prices').doc(symbol);
+            firestoreBatch.set(docRef, {
+              symbol,
+              price,
+              name: item.title || item.name || '',
+              type: item.type || '',
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              date: item.date || new Date().toLocaleDateString('tr-TR'),
+              source: 'background_sync'
+            }, { merge: true });
+            batchCount++;
+            totalUpdated++;
+          }
+        }
+
+        if (batchCount > 0) {
+          await firestoreBatch.commit();
+        }
+        
+        if (i + batchSize < symbols.length) {
+          const delay = 5000 + Math.random() * 3000;
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      console.log(`[TEFAS SYNC] Sync completed. Updated ${totalUpdated} funds.`);
+      return { success: true, count: totalUpdated };
+    } catch (e) {
+      console.error('[TEFAS SYNC] Sync failed:', e);
+      return { success: false, count: 0 };
+    } finally {
+      this.isSyncing = false;
+    }
   }
 
-  public static async fetchWithRetry(symbol: string, fundType: string): Promise<number | null> {
+  public static async getPriceFromDb(symbol: string): Promise<number | null> {
     const fonkod = symbol.toUpperCase();
 
-    // First, try database
-    if (db) {
-      try {
-        const doc = await db.collection('fund_prices').doc(fonkod).get();
-        if (doc.exists) {
-          const data = doc.data();
-          const updatedAt = data?.updatedAt?.toDate();
-          if (updatedAt && (Date.now() - updatedAt.getTime()) < 24 * 60 * 60 * 1000) {
-            console.log(`[TEFAS] Found ${fonkod} in DB: ${data?.price}`);
-            return data?.price;
-          }
-        }
-      } catch (e: any) {
-        if (e.code === 5 || e.message?.includes('NOT_FOUND')) {
-          console.warn(`[TEFAS] Firestore database or collection not found. This is expected if syncing hasn't completed or database is provisioning.`);
-        } else {
-          console.warn(`[TEFAS] DB fetch error for ${fonkod}:`, e.message || e);
-        }
+    if (!db) return null;
+
+    try {
+      const doc = await db.collection('fund_prices').doc(fonkod).get();
+      if (doc.exists) {
+        const data = doc.data();
+        return data?.price || null;
       }
+      
+      // If not in DB, we DO NOT fetch from proxy here.
+      // We just log it and wait for the next background sync to discover and fetch it.
+      console.log(`[TEFAS] ${fonkod} not found in DB. Discovery will pick it up in the next sync.`);
+    } catch (e: any) {
+      console.warn(`[TEFAS] DB fetch error for ${fonkod}:`, e.message || e);
     }
 
-    const domains = ['https://www.tefas.gov.tr', 'https://fundturkey.com.tr'];
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 30);
-
-    const formatDate = (date: Date) => {
-      const d = date.getDate().toString().padStart(2, '0');
-      const m = (date.getMonth() + 1).toString().padStart(2, '0');
-      const y = date.getFullYear();
-      return `${d}.${m}.${y}`;
-    };
-
-    const startDateStr = formatDate(startDate);
-    const endDateStr = formatDate(endDate);
-
-    for (const domain of domains) {
-      // Exponential backoff retry logic with longer delays
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          if (attempt > 0) {
-            const delay = Math.pow(3, attempt) * 2000; // 6s, 18s
-            await this.sleep(delay);
-          }
-
-          const payload = new URLSearchParams({
-            'fontip': fundType,
-            'sfonkod': fonkod,
-            'bastarih': startDateStr,
-            'bittarih': endDateStr,
-            'fonturkod': ''
-          });
-
-          const result = await this.request(domain, '/api/DB/BindHistoryInfo', payload.toString(), fonkod, attempt);
-          
-          if (result.data && Array.isArray(result.data) && result.data.length > 0) {
-            // Filter by symbol first to ensure we are looking at the right fund
-            const fundData = result.data.filter(item => {
-              const itemSymbol = (item.FONKODU || item.FONKOD || '').toString().toUpperCase();
-              return itemSymbol === fonkod;
-            });
-
-            if (fundData.length === 0) {
-              console.warn(`[TEFAS] Symbol mismatch: requested ${fonkod}, but not found in response. Clearing session.`);
-              const sessionKey = `${domain}_${fonkod}`;
-              delete this.sessions[sessionKey];
-              continue; 
-            }
-
-            const sorted = [...fundData].sort((a, b) => {
-              const dateA = new Date(a.TARIH.split('.').reverse().join('-')).getTime();
-              const dateB = new Date(b.TARIH.split('.').reverse().join('-')).getTime();
-              return dateB - dateA;
-            });
-            
-            if (sorted[0].FIYAT) {
-              // Handle Turkish comma decimal separator
-              const rawPrice = sorted[0].FIYAT.toString().replace(',', '.');
-              return parseFloat(rawPrice);
-            }
-          }
-        } catch (e) {
-          console.warn(`[TEFAS] Attempt ${attempt + 1} failed for ${fonkod} on ${domain}:`, e instanceof Error ? e.message : e);
-        }
-      }
-    }
     return null;
   }
 }
@@ -529,17 +424,10 @@ export async function syncAllTefasPrices() {
   return await TefasClient.syncAllPrices();
 }
 
-export async function getTefasPrice(symbol: string, type: string = 'YAT') {
+export async function getTefasPrice(symbol: string) {
   try {
-    let price = await TefasClient.fetchWithRetry(symbol, type);
-
-    if (price === null) {
-      const fallbacks = ['YAT', 'EMK', 'BYF'].filter(t => t !== type);
-      for (const fType of fallbacks) {
-        price = await TefasClient.fetchWithRetry(symbol, fType);
-        if (price !== null) break;
-      }
-    }
+    // ONLY fetch from DB. No live proxy calls for frontend requests.
+    const price = await TefasClient.getPriceFromDb(symbol);
 
     if (price !== null) {
       const rate = await getUsdTryRate();
@@ -549,4 +437,72 @@ export async function getTefasPrice(symbol: string, type: string = 'YAT') {
     console.error(`[TEFAS] Error for ${symbol}:`, error);
   }
   return null;
+}
+
+export async function getHistoricalPrices(symbol: string, type: string) {
+  console.log(`[HISTORICAL] Fetching for ${type}: ${symbol}`);
+  const rate = await getUsdTryRate();
+  
+  if (type === 'Stock') {
+    const s = symbol.includes('.') ? symbol : `${symbol}.IS`;
+    const endpoints = [
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1d&range=7d`,
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1d&range=7d`
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+          }
+        });
+        if (!response.ok) continue;
+        const data: any = await response.json();
+        const result = data?.chart?.result?.[0];
+        const prices = result?.indicators?.quote?.[0]?.close || [];
+        
+        let finalPrices = prices.filter((p: any) => p !== null);
+        if (s.endsWith('.IS')) {
+          finalPrices = finalPrices.map((p: number) => p / rate);
+        }
+        if (finalPrices.length > 0) {
+          console.log(`[HISTORICAL] Stock ${symbol} success from ${url}, points: ${finalPrices.length}`);
+          return finalPrices;
+        }
+      } catch (e) {
+        console.warn(`[HISTORICAL] Stock error for ${symbol} from ${url}:`, e);
+      }
+    }
+    return [];
+  }
+
+  if (type === 'Crypto') {
+    try {
+      const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol.toUpperCase()}USDT&interval=1d&limit=7`);
+      if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
+      const data: any = await response.json();
+      const finalPrices = data.map((d: any) => parseFloat(d[4])); // Closing price
+      console.log(`[HISTORICAL] Crypto ${symbol} success, points: ${finalPrices.length}`);
+      return finalPrices;
+    } catch (e) {
+      console.error(`[HISTORICAL] Crypto error for ${symbol}:`, e);
+      return [];
+    }
+  }
+
+  if (type === 'Fund' || type === 'GovernmentContribution') {
+    try {
+      const currentPrice = await getTefasPrice(symbol);
+      // Return two points to show a flat line instead of a pulse
+      const finalPrices = currentPrice ? [currentPrice, currentPrice] : [];
+      console.log(`[HISTORICAL] Fund ${symbol} success, points: ${finalPrices.length}`);
+      return finalPrices;
+    } catch (e) {
+      console.error(`[HISTORICAL] Fund error for ${symbol}:`, e);
+      return [];
+    }
+  }
+
+  return [];
 }

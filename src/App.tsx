@@ -51,7 +51,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 import { UserProfile, Portfolio, Asset } from './types';
-import { fetchStockPrice, fetchCryptoPrice, fetchTefasPrice } from './services/finance';
+import { fetchStockPrice, fetchCryptoPrice, fetchTefasPrice, fetchPriceHistory } from './services/finance';
 import { Button } from './components/ui/Button';
 import { Card } from './components/ui/Card';
 import { Treemap } from './components/dashboard/Treemap';
@@ -66,6 +66,70 @@ import { AddPortfolioModal } from './components/modals/AddPortfolioModal';
 // --- Services ---
 
 // --- Components ---
+
+function Sparkline({ symbol, type }: { symbol: string; type: string }) {
+  const [data, setData] = useState<number[]>([]);
+  const [error, setError] = useState(false);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  useEffect(() => {
+    setError(false);
+    fetchPriceHistory(symbol, type)
+      .then(res => {
+        if (res && res.length >= 1) {
+          setData(res);
+        } else {
+          setError(true);
+        }
+      })
+      .catch(() => setError(true));
+  }, [symbol, type]);
+
+  useEffect(() => {
+    if (!svgRef.current || data.length < 1) return;
+
+    const width = 80;
+    const height = 30;
+    const margin = 2;
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    const x = d3.scaleLinear()
+      .domain([0, Math.max(1, data.length - 1)])
+      .range([margin, width - margin]);
+
+    const min = d3.min(data as number[]) || 0;
+    const max = d3.max(data as number[]) || 0;
+    // Ensure we have a visible range even for flat lines
+    const domain = min === max ? [min * 0.99, max * 1.01] : [min, max];
+
+    const y = d3.scaleLinear()
+      .domain(domain)
+      .range([height - margin, margin]);
+
+    const line = d3.line<number>()
+      .x((_, i) => x(i))
+      .y(d => y(d))
+      .curve(data.length > 2 ? d3.curveBasis : d3.curveLinear);
+
+    const isUp = data.length >= 2 ? data[data.length - 1] >= data[0] : true;
+    const color = isUp ? '#10b981' : '#ef4444';
+
+    svg.append("path")
+      .datum(data)
+      .attr("fill", "none")
+      .attr("stroke", color)
+      .attr("stroke-width", 1.5)
+      .attr("d", line);
+
+  }, [data]);
+
+  if (error) return <div className="w-20 h-[30px] flex items-center justify-center text-[10px] text-slate-300 italic">N/A</div>;
+  if (data.length < 1) return <div className="w-20 h-[30px] bg-slate-100 dark:bg-slate-800/50 rounded animate-pulse" />;
+
+  return <svg ref={svgRef} width="80" height="30" className="overflow-visible" />;
+}
 
 function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClose: () => void; onImport: (assets: Omit<Asset, 'id' | 'portfolioId'>[]) => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -275,7 +339,6 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
   const [dividendYield, setDividendYield] = useState('');
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [type, setType] = useState<Asset['type']>('Stock');
-  const [tefasType, setTefasType] = useState<'YAT' | 'EMK' | 'BYF'>('YAT');
   const [isFetching, setIsFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -288,7 +351,6 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
     setDividendYield('');
     setCurrentPrice(null);
     setType('Stock');
-    setTefasType('YAT');
     setIsFetching(false);
     setFetchError(null);
   };
@@ -299,46 +361,58 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
   };
 
   useEffect(() => {
-    const timer = setTimeout(async () => {
-      if (symbol.length >= 2) {
+    let intervalId: NodeJS.Timeout;
+
+    const fetchPrice = async (isAutoRefresh = false) => {
+      if (symbol.length < 2) return;
+      
+      if (!isAutoRefresh) {
         setIsFetching(true);
         setFetchError(null);
-        let fetchedPrice: number | null = null;
-        
-        try {
-          if (type === 'Crypto') {
-            fetchedPrice = await fetchCryptoPrice(symbol);
-          } else if (type === 'Stock') {
-            const result = await fetchStockPrice(symbol);
-            if (result) fetchedPrice = result.price;
-          } else if (type === 'Fund' || type === 'GovernmentContribution') {
-            fetchedPrice = await fetchTefasPrice(symbol, type === 'GovernmentContribution' ? 'EMK' : tefasType);
-          }
-
-          if (fetchedPrice) {
-            setCurrentPrice(fetchedPrice);
-            // Automatically update purchase price input when symbol/type changes
-            setPrice(fetchedPrice.toString());
-          } else {
-            setCurrentPrice(null);
-            if (type === 'Fund' || type === 'GovernmentContribution') {
-              setFetchError('TEFAS API is currently blocking the server. Please enter the price manually.');
-            } else {
-              setFetchError('Price not found. Check symbol and type.');
-            }
-          }
-        } catch (e) {
-          setFetchError('Failed to fetch price.');
-        }
-        setIsFetching(false);
-      } else {
-        setCurrentPrice(null);
-        setFetchError(null);
       }
+      
+      let fetchedPrice: number | null = null;
+      try {
+        if (type === 'Crypto') {
+          fetchedPrice = await fetchCryptoPrice(symbol);
+        } else if (type === 'Stock') {
+          const result = await fetchStockPrice(symbol);
+          if (result) fetchedPrice = result.price;
+        } else if (type === 'Fund' || type === 'GovernmentContribution') {
+          fetchedPrice = await fetchTefasPrice(symbol);
+        }
+
+        if (fetchedPrice) {
+          setCurrentPrice(fetchedPrice);
+          if (!isAutoRefresh) {
+            setPrice(fetchedPrice.toString());
+          }
+        } else if (!isAutoRefresh) {
+          setCurrentPrice(null);
+          if (type === 'Fund' || type === 'GovernmentContribution') {
+            setFetchError('TEFAS verisi veritabanında bulunamadı. Bir sonraki senkronizasyonda eklenecektir.');
+          } else {
+            setFetchError('Price not found. Check symbol and type.');
+          }
+        }
+      } catch (e) {
+        if (!isAutoRefresh) setFetchError('Failed to fetch price.');
+      } finally {
+        if (!isAutoRefresh) setIsFetching(false);
+      }
+    };
+
+    const debounceTimer = setTimeout(() => {
+      fetchPrice();
+      // Start interval after initial fetch
+      intervalId = setInterval(() => fetchPrice(true), 60000);
     }, 1000);
 
-    return () => clearTimeout(timer);
-  }, [symbol, type, tefasType]);
+    return () => {
+      clearTimeout(debounceTimer);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [symbol, type]);
 
   if (!isOpen) return null;
 
@@ -388,34 +462,11 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
             </div>
           </div>
 
-          {type === 'Fund' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Fund Type</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['YAT', 'EMK', 'BYF'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTefasType(t)}
-                    className={cn(
-                      "px-3 py-2 text-xs font-bold rounded-lg border transition-all",
-                      tefasType === t
-                        ? "bg-indigo-600 border-indigo-600 text-white"
-                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-indigo-400"
-                    )}
-                  >
-                    {t === 'YAT' ? 'Yatırım' : t === 'EMK' ? 'Emeklilik' : 'BYF'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {type === 'GovernmentContribution' && (
             <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-xl">
               <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">Info</p>
               <p className="text-xs text-rose-600 dark:text-rose-400">
-                Devlet Katkısı fonları TEFAS üzerinde "Emeklilik" (EMK) kategorisinde sorgulanır. Sistem bunu otomatik olarak yapacaktır.
+                Devlet Katkısı fonları veritabanı üzerinden otomatik olarak sorgulanır.
               </p>
             </div>
           )}
@@ -505,7 +556,7 @@ function AddAssetModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: (
                 purchasePrice: parseFloat(price),
                 purchaseCurrency: 'USD',
                 type,
-                tefasType: (type === 'Fund' || type === 'GovernmentContribution') ? (type === 'GovernmentContribution' ? 'EMK' : tefasType) : undefined,
+                tefasType: (type === 'Fund' || type === 'GovernmentContribution') ? (type === 'GovernmentContribution' ? 'EMK' : 'YAT') : undefined,
                 dividendYield: dividendYield ? parseFloat(dividendYield) / 100 : undefined
               });
               handleClose();
@@ -528,7 +579,6 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
   const [dividendYield, setDividendYield] = useState('');
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [type, setType] = useState<Asset['type']>('Stock');
-  const [tefasType, setTefasType] = useState<'YAT' | 'EMK' | 'BYF'>('YAT');
   const [isFetching, setIsFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -540,7 +590,6 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
       setDividendYield(asset.dividendYield ? (asset.dividendYield * 100).toString() : '');
       setCurrentPrice(asset.currentPrice || null);
       setType(asset.type);
-      setTefasType(asset.tefasType || 'YAT');
     }
   }, [asset]);
 
@@ -551,42 +600,59 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
   };
 
   useEffect(() => {
-    const timer = setTimeout(async () => {
-      if (symbol.length >= 2 && symbol !== asset?.symbol) {
+    let intervalId: NodeJS.Timeout;
+
+    const fetchPrice = async (isAutoRefresh = false) => {
+      if (symbol.length < 2) return;
+      if (symbol === asset?.symbol && !isAutoRefresh) return; // Don't re-fetch initial symbol unless it's auto-refresh
+      
+      if (!isAutoRefresh) {
         setIsFetching(true);
         setFetchError(null);
-        let fetchedPrice: number | null = null;
-        
-        try {
-          if (type === 'Crypto') {
-            fetchedPrice = await fetchCryptoPrice(symbol);
-          } else if (type === 'Stock') {
-            const result = await fetchStockPrice(symbol);
-            if (result) fetchedPrice = result.price;
-          } else if (type === 'Fund' || type === 'GovernmentContribution') {
-            fetchedPrice = await fetchTefasPrice(symbol, type === 'GovernmentContribution' ? 'EMK' : tefasType);
-          }
-
-          if (fetchedPrice) {
-            setCurrentPrice(fetchedPrice);
-            setPrice(fetchedPrice.toString());
-          } else {
-            setCurrentPrice(null);
-            if (type === 'Fund' || type === 'GovernmentContribution') {
-              setFetchError('TEFAS API is currently blocking the server. Please enter the price manually.');
-            } else {
-              setFetchError('Price not found. Check symbol and type.');
-            }
-          }
-        } catch (e) {
-          setFetchError('Failed to fetch price.');
-        }
-        setIsFetching(false);
       }
+      
+      let fetchedPrice: number | null = null;
+      try {
+        if (type === 'Crypto') {
+          fetchedPrice = await fetchCryptoPrice(symbol);
+        } else if (type === 'Stock') {
+          const result = await fetchStockPrice(symbol);
+          if (result) fetchedPrice = result.price;
+        } else if (type === 'Fund' || type === 'GovernmentContribution') {
+          fetchedPrice = await fetchTefasPrice(symbol);
+        }
+
+        if (fetchedPrice) {
+          setCurrentPrice(fetchedPrice);
+          if (!isAutoRefresh) {
+            setPrice(fetchedPrice.toString());
+          }
+        } else if (!isAutoRefresh) {
+          setCurrentPrice(null);
+          if (type === 'Fund' || type === 'GovernmentContribution') {
+            setFetchError('TEFAS verisi veritabanında bulunamadı. Bir sonraki senkronizasyonda eklenecektir.');
+          } else {
+            setFetchError('Price not found. Check symbol and type.');
+          }
+        }
+      } catch (e) {
+        if (!isAutoRefresh) setFetchError('Failed to fetch price.');
+      } finally {
+        if (!isAutoRefresh) setIsFetching(false);
+      }
+    };
+
+    const debounceTimer = setTimeout(() => {
+      fetchPrice();
+      // Start interval after initial fetch
+      intervalId = setInterval(() => fetchPrice(true), 60000);
     }, 1000);
 
-    return () => clearTimeout(timer);
-  }, [symbol, type, tefasType, asset?.symbol]);
+    return () => {
+      clearTimeout(debounceTimer);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [symbol, type, asset?.symbol]);
 
   if (!isOpen || !asset) return null;
 
@@ -636,34 +702,11 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
             </div>
           </div>
 
-          {type === 'Fund' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Fund Type</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['YAT', 'EMK', 'BYF'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTefasType(t)}
-                    className={cn(
-                      "px-3 py-2 text-xs font-bold rounded-lg border transition-all",
-                      tefasType === t
-                        ? "bg-indigo-600 border-indigo-600 text-white"
-                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-indigo-400"
-                    )}
-                  >
-                    {t === 'YAT' ? 'Yatırım' : t === 'EMK' ? 'Emeklilik' : 'BYF'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {type === 'GovernmentContribution' && (
             <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-xl">
               <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">Info</p>
               <p className="text-xs text-rose-600 dark:text-rose-400">
-                Devlet Katkısı fonları TEFAS üzerinde "Emeklilik" (EMK) kategorisinde sorgulanır. Sistem bunu otomatik olarak yapacaktır.
+                Devlet Katkısı fonları veritabanı üzerinden otomatik olarak sorgulanır.
               </p>
             </div>
           )}
@@ -752,7 +795,7 @@ function EditAssetModal({ isOpen, onClose, onEdit, asset }: { isOpen: boolean; o
                 quantity: parseFloat(quantity),
                 purchasePrice: parseFloat(price),
                 type,
-                tefasType: (type === 'Fund' || type === 'GovernmentContribution') ? (type === 'GovernmentContribution' ? 'EMK' : tefasType) : undefined,
+                tefasType: (type === 'Fund' || type === 'GovernmentContribution') ? (type === 'GovernmentContribution' ? 'EMK' : 'YAT') : undefined,
                 dividendYield: dividendYield ? parseFloat(dividendYield) / 100 : undefined
               });
               handleClose();
@@ -808,7 +851,57 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
   }, [selectedPortfolioId, authContext?.user]);
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
   const [syncResult, setSyncResult] = useState<{ success: boolean; count: number } | null>(null);
+
+  const handleRefreshPrices = async () => {
+    if (assets.length === 0 || !selectedPortfolioId || isRefreshingPrices) return;
+    
+    setIsRefreshingPrices(true);
+    try {
+      // Process assets in sequence to avoid rate limits
+      for (const asset of assets) {
+        try {
+          let price = null;
+          let dividendYield = asset.dividendYield;
+          let dividendGrowth5Y = asset.dividendGrowth5Y;
+          let dividendGrowth10Y = asset.dividendGrowth10Y;
+
+          if (asset.type === 'Stock') {
+            const result = await fetchStockPrice(asset.symbol);
+            if (result) {
+              price = result.price;
+              if (result.dividendYield !== undefined) dividendYield = result.dividendYield;
+              if (result.dividendGrowth5Y !== undefined) dividendGrowth5Y = result.dividendGrowth5Y;
+              if (result.dividendGrowth10Y !== undefined) dividendGrowth10Y = result.dividendGrowth10Y;
+            }
+          } else if (asset.type === 'Crypto') {
+            price = await fetchCryptoPrice(asset.symbol);
+          } else if (asset.type === 'Fund' || asset.type === 'GovernmentContribution') {
+            price = await fetchTefasPrice(asset.symbol);
+          }
+
+          const updates: any = {};
+          if (price !== null && price !== asset.currentPrice) updates.currentPrice = price;
+          if (dividendYield !== undefined && dividendYield !== asset.dividendYield) updates.dividendYield = dividendYield;
+          if (dividendGrowth5Y !== undefined && dividendGrowth5Y !== asset.dividendGrowth5Y) updates.dividendGrowth5Y = dividendGrowth5Y;
+          if (dividendGrowth10Y !== undefined && dividendGrowth10Y !== asset.dividendGrowth10Y) updates.dividendGrowth10Y = dividendGrowth10Y;
+
+          if (Object.keys(updates).length > 0) {
+            const assetRef = doc(db, `portfolios/${asset.portfolioId}/assets`, asset.id);
+            await setDoc(assetRef, updates, { merge: true });
+          }
+          
+          // Small delay between assets
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (e) {
+          console.error(`Error updating ${asset.symbol}:`, e);
+        }
+      }
+    } finally {
+      setIsRefreshingPrices(false);
+    }
+  };
 
   const handleSyncTefas = async () => {
     setIsSyncing(true);
@@ -826,72 +919,13 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
 
   useEffect(() => {
     if (assets.length === 0 || !selectedPortfolioId) return;
-
-    const fetchAllPrices = async () => {
-      // Process assets in sequence to avoid rate limits and provide steady updates
-      for (const asset of assets) {
-        try {
-          let price = null;
-          let dividendYield = asset.dividendYield;
-          let dividendGrowth5Y = asset.dividendGrowth5Y;
-          let dividendGrowth10Y = asset.dividendGrowth10Y;
-
-          if (asset.type === 'Stock') {
-            const result = await fetchStockPrice(asset.symbol);
-            if (result) {
-              price = result.price;
-              // Update dividend yield and growth if they were not manually set or if we found new ones
-              if (result.dividendYield !== undefined) {
-                dividendYield = result.dividendYield;
-              }
-              if (result.dividendGrowth5Y !== undefined) {
-                dividendGrowth5Y = result.dividendGrowth5Y;
-              }
-              if (result.dividendGrowth10Y !== undefined) {
-                dividendGrowth10Y = result.dividendGrowth10Y;
-              }
-            }
-          } else if (asset.type === 'Crypto') {
-            price = await fetchCryptoPrice(asset.symbol);
-          } else if (asset.type === 'Fund' || asset.type === 'GovernmentContribution') {
-            price = await fetchTefasPrice(asset.symbol, asset.type === 'GovernmentContribution' ? 'EMK' : asset.tefasType);
-          }
-
-          // Only update if price or dividend data is valid and different
-          const updates: any = {};
-          if (price !== null && price !== asset.currentPrice) {
-            updates.currentPrice = price;
-          }
-          if (dividendYield !== undefined && dividendYield !== asset.dividendYield) {
-            updates.dividendYield = dividendYield;
-          }
-          if (dividendGrowth5Y !== undefined && dividendGrowth5Y !== asset.dividendGrowth5Y) {
-            updates.dividendGrowth5Y = dividendGrowth5Y;
-          }
-          if (dividendGrowth10Y !== undefined && dividendGrowth10Y !== asset.dividendGrowth10Y) {
-            updates.dividendGrowth10Y = dividendGrowth10Y;
-          }
-
-          if (Object.keys(updates).length > 0) {
-            const assetRef = doc(db, `portfolios/${asset.portfolioId}/assets`, asset.id);
-            await setDoc(assetRef, updates, { merge: true });
-          }
-
-          // Add a small delay between requests to avoid rate limits (as requested by user)
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (e) {
-          console.error(`Error updating price for ${asset.symbol}:`, e);
-        }
-      }
-    };
-
-    // Initial fetch
-    fetchAllPrices();
-
-    // Set up interval for subsequent fetches
-    const interval = setInterval(fetchAllPrices, 60000);
+    
+    // Auto-refresh prices every 30 minutes, or once when portfolio changes
+    handleRefreshPrices();
+    
+    const interval = setInterval(handleRefreshPrices, 30 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [selectedPortfolioId, assets.length]); // Only re-run if portfolio changes or asset count changes
+  }, [selectedPortfolioId]); // Only re-run when portfolio changes
 
   const handleAddAsset = async (assetData: Omit<Asset, 'id' | 'portfolioId'>) => {
     if (!selectedPortfolioId || !authContext?.user) return;
@@ -922,7 +956,7 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
         } else if (assetData.type === 'Crypto') {
           initialPrice = await fetchCryptoPrice(assetData.symbol);
         } else if (assetData.type === 'Fund' || assetData.type === 'GovernmentContribution') {
-          initialPrice = await fetchTefasPrice(assetData.symbol, assetData.type === 'GovernmentContribution' ? 'EMK' : assetData.tefasType);
+          initialPrice = await fetchTefasPrice(assetData.symbol);
         }
       } catch (e) {
         console.error("Initial price fetch failed:", e);
@@ -1025,7 +1059,7 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
           } else if (asset.type === 'Crypto') {
             initialPrice = await fetchCryptoPrice(asset.symbol);
           } else if (asset.type === 'Fund' || asset.type === 'GovernmentContribution') {
-            initialPrice = await fetchTefasPrice(asset.symbol, asset.type === 'GovernmentContribution' ? 'EMK' : asset.tefasType);
+            initialPrice = await fetchTefasPrice(asset.symbol);
           }
         } catch (e) {
           console.error(`Initial price fetch failed for ${asset.symbol}:`, e);
@@ -1263,21 +1297,6 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleSyncTefas}
-              disabled={isSyncing}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all",
-                isSyncing 
-                  ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
-                  : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-800/50"
-              )}
-              title="Sync all TEFAS fund prices to database"
-            >
-              <RefreshCw className={cn("w-4 h-4", isSyncing && "animate-spin")} />
-              <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync TEFAS'}</span>
-            </button>
-
             <div className="relative">
               <select
                 value={selectedPortfolioId || ''}
@@ -1291,6 +1310,22 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
               </select>
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             </div>
+            <button 
+              onClick={handleSyncTefas}
+              disabled={isSyncing}
+              className={cn(
+                "p-2.5 rounded-xl transition-all border flex items-center gap-2",
+                isSyncing 
+                  ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-400 border-indigo-100 dark:border-indigo-900/30" 
+                  : "bg-white dark:bg-slate-900 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 border-slate-200 dark:border-slate-800"
+              )}
+              title="Sync TEFAS Prices"
+            >
+              <RefreshCw className={cn("w-5 h-5", isSyncing && "animate-spin")} />
+              <span className="text-sm font-bold hidden sm:inline">
+                {isSyncing ? 'Syncing...' : 'Sync TEFAS'}
+              </span>
+            </button>
           </div>
         </div>
 
@@ -1456,6 +1491,20 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
                   </div>
                   
                   <div className="flex items-center gap-3">
+                    <button 
+                      onClick={handleRefreshPrices}
+                      disabled={isRefreshingPrices || assets.length === 0}
+                      className={cn(
+                        "p-2 rounded-xl transition-all border flex items-center gap-2",
+                        isRefreshingPrices 
+                          ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-400 border-indigo-100 dark:border-indigo-900/30" 
+                          : "text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 border-indigo-100 dark:border-indigo-900/30"
+                      )}
+                      title="Refresh all prices"
+                    >
+                      <RefreshCw className={cn("w-5 h-5", isRefreshingPrices && "animate-spin")} />
+                      {isRefreshingPrices && <span className="text-xs font-medium hidden sm:inline">Updating...</span>}
+                    </button>
                     <div className="relative flex-1 sm:flex-none">
                       <input 
                         type="text"
@@ -1530,9 +1579,14 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
                         return (
                           <tr key={asset.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors group">
                             <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <span className="font-bold text-slate-900 dark:text-white">{asset.symbol}</span>
-                                <span className="text-xs text-slate-500 dark:text-slate-400">{asset.name}</span>
+                              <div className="flex items-center gap-3">
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-slate-900 dark:text-white">{asset.symbol}</span>
+                                  <span className="text-xs text-slate-500 dark:text-slate-400">{asset.name}</span>
+                                </div>
+                                <div className="hidden md:block">
+                                  <Sparkline symbol={asset.symbol} type={asset.type} />
+                                </div>
                               </div>
                             </td>
                             <td className="px-6 py-4">
@@ -1770,6 +1824,7 @@ function LandingPage() {
 }
 
 export default function App() {
+  console.log("[APP] Rendering...");
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);

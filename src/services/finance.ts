@@ -49,7 +49,7 @@ export const fetchCryptoPrice = async (symbol: string): Promise<number | null> =
   }
 };
 
-export const fetchTefasPrice = async (symbol: string, type: Asset['tefasType']): Promise<number | null> => {
+export const fetchTefasPrice = async (symbol: string): Promise<number | null> => {
   const maxRetries = 3;
   let delay = 1000;
 
@@ -60,7 +60,7 @@ export const fetchTefasPrice = async (symbol: string, type: Asset['tefasType']):
         delay *= 2; // Exponential backoff
       }
 
-      const response = await fetch(`/api/price/tefas/${encodeURIComponent(symbol)}?type=${type || ''}&t=${Date.now()}`, {
+      const response = await fetch(`/api/price/tefas/${encodeURIComponent(symbol)}?t=${Date.now()}`, {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache',
@@ -89,4 +89,16 @@ export const fetchTefasPrice = async (symbol: string, type: Asset['tefasType']):
     }
   }
   return null;
+};
+
+export const fetchPriceHistory = async (symbol: string, type: string): Promise<number[]> => {
+  try {
+    const response = await fetch(`/api/history/${encodeURIComponent(type)}/${encodeURIComponent(symbol)}?t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    return data.history || [];
+  } catch (error) {
+    console.error(`Error fetching history for ${symbol}:`, error);
+    return [];
+  }
 };

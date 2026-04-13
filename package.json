@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "node server.ts",
-    "build": "vite build",
+    "dev": "NODE_ENV=development tsx server.ts",
+    "start": "NODE_ENV=production node dist/server.js",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:vite --external:express --external:firebase-admin --external:node-cron",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
@@ -26,6 +26,7 @@
     "firebase-admin": "^13.8.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "node-cron": "^4.2.1",
     "papaparse": "^5.5.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
