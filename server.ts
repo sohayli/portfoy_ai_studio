@@ -55,9 +55,22 @@ async function startServer() {
         return res.status(400).json({ error: 'No credential provided' });
       }
       
+      // Decode JWT to get picture URL (Google JWT includes picture claim)
+      const jwtPayload = JSON.parse(Buffer.from(credential.split('.')[1], 'base64').toString());
+      const pictureUrl = jwtPayload.picture || null;
+      
+      console.log('[AUTH] JWT decoded picture:', jwtPayload.picture);
+      
       // Verify Google token
       const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
       const googleUser = await response.json();
+      
+      console.log('[AUTH] Google user data:', {
+        sub: googleUser.sub,
+        email: googleUser.email,
+        name: googleUser.name,
+        picture: pictureUrl,
+      });
       
       if (!response.ok) {
         return res.status(401).json({ error: 'Invalid Google token' });
@@ -84,8 +97,17 @@ async function startServer() {
           id: userId,
           email: googleUser.email,
           displayName: googleUser.name || googleUser.email,
+          avatarUrl: pictureUrl,
           baseCurrency: 'USD',
         }).returning();
+      } else {
+        // Update avatar if changed
+        if (pictureUrl && user[0].avatarUrl !== pictureUrl) {
+          user = await db.update(users)
+            .set({ avatarUrl: pictureUrl, displayName: googleUser.name || user[0].displayName })
+            .where(eq(users.id, userId))
+            .returning();
+        }
       }
       
       // Generate JWT
@@ -101,6 +123,7 @@ async function startServer() {
           id: userId,
           email: googleUser.email,
           displayName: user[0].displayName,
+          avatarUrl: pictureUrl,
         }
       });
     } catch (error) {

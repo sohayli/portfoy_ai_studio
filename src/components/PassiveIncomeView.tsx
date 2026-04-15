@@ -24,8 +24,8 @@ import {
   Cell
 } from 'recharts';
 import { Portfolio, Asset } from '../types';
-import { Card } from './ui/Card';
-import { Button } from './ui/Button';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { cn, formatCurrency } from '../lib/utils';
 import { getAssetsByUser } from '../lib/api';
 import { AuthContext } from '../context';

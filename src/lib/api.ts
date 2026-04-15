@@ -19,6 +19,7 @@ export interface User {
   id: string;
   email: string;
   displayName?: string;
+  avatarUrl?: string;
   baseCurrency?: string;
   createdAt?: string;
 }
@@ -189,9 +190,12 @@ export async function signInWithGoogle(): Promise<void> {
   return new Promise((resolve, reject) => {
     window.google.accounts.id.initialize({
       client_id: '642674294207-agfrtso7m3pphppijaju0h9vhsq527sf.apps.googleusercontent.com',
+      scope: 'email profile',
       callback: async (response: any) => {
         if (response.credential) {
           try {
+            console.log('[AUTH] Google credential received');
+            
             // Send credential to backend
             const authResponse = await fetch('/api/auth/google', {
               method: 'POST',
@@ -202,6 +206,9 @@ export async function signInWithGoogle(): Promise<void> {
             const authData = await authResponse.json();
             
             if (authResponse.ok && authData.token) {
+              console.log('[AUTH] Login response from server:', authData.user);
+              console.log('[AUTH] Avatar URL:', authData.user?.avatarUrl);
+              
               // Store JWT token
               localStorage.setItem('authToken', authData.token);
               localStorage.setItem('userId', authData.user.id);

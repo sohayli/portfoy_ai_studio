@@ -14,8 +14,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Portfolio, UserProfile } from '../types';
-import { Button } from './ui/Button';
-import { Card } from './ui/Card';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { cn, formatCurrency } from '../lib/utils';
 import { AddPortfolioModal } from './modals/AddPortfolioModal';
 import { EditPortfolioModal } from './modals/EditPortfolioModal';
@@ -130,7 +130,7 @@ export function Settings({ profile, onUpdateProfile, portfolios, onAddPortfolio,
                             <Pencil className="w-4 h-4" />
                           </Button>
                           <Button 
-                            variant="danger" 
+                            variant="destructive" 
                             size="icon"
                             onClick={() => {
                               if (window.confirm(`Are you sure you want to delete "${portfolio.name}"? All assets inside will be lost.`)) {

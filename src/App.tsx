@@ -1,6 +1,7 @@
 import { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
 import Papa from 'papaparse';
+import React from 'react';
 import { AuthContext, ThemeContext } from './context';
 import { 
   getUser,
@@ -23,6 +24,14 @@ import {
   Asset as APIAsset
 } from './lib/api';
 import { cn, formatCurrency, formatNumber } from './lib/utils';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import { motion, AnimatePresence } from 'motion/react';
+import { UserProfile, Portfolio, Asset } from './types';
+import { fetchStockPrice, fetchCryptoPrice, fetchTefasPrice, fetchPriceHistory } from './services/finance';
 import { 
   Plus, 
   TrendingUp, 
@@ -51,12 +60,6 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-
-import { UserProfile, Portfolio, Asset } from './types';
-import { fetchStockPrice, fetchCryptoPrice, fetchTefasPrice, fetchPriceHistory } from './services/finance';
-import { Button } from './components/ui/Button';
-import { Card } from './components/ui/Card';
 import { Treemap } from './components/dashboard/Treemap';
 import { Navbar } from './components/Navbar';
 import { Settings } from './components/Settings';
@@ -1837,52 +1840,182 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
 }
 
 function LandingPage() {
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      if (authMode === 'login') {
+        // For demo, just use Google OAuth
+        await signInWithGoogle();
+      } else {
+        // Register - for now just use Google OAuth too
+        await signInWithGoogle();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed');
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-[calc(100vh-64px)] flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 px-4 transition-colors">
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="max-w-3xl text-center space-y-8"
-      >
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-widest">
-          <RefreshCw className="w-3 h-3" />
-          Real-time USD Tracking
-        </div>
-        <h1 className="text-5xl md:text-7xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-[0.9]">
-          Track your wealth <br />
-          <span className="text-indigo-600 dark:text-indigo-500">without borders.</span>
-        </h1>
-        <p className="text-xl text-slate-600 dark:text-slate-400 max-w-xl mx-auto leading-relaxed">
-          FinTrack provides real-time USD tracking for all your global investments, from stocks to crypto.
-        </p>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <button 
-            onClick={() => signInWithGoogle()}
-            className="w-full sm:w-auto bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 dark:shadow-none flex items-center justify-center gap-2"
-          >
-            Get Started Free
-            <ArrowUpRight className="w-5 h-5" />
-          </button>
-          <button className="w-full sm:w-auto px-8 py-4 rounded-2xl font-bold text-lg text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-900 transition-all">
-            Learn More
-          </button>
-        </div>
-      </motion.div>
-      
-      <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl w-full">
-        {[
-          { icon: Wallet, title: "Multi-Portfolio", desc: "Organize assets into sub-portfolios like Retirement or Kids Fund." },
-          { icon: RefreshCw, title: "Live Prices", desc: "Get real-time price updates for stocks, crypto, and funds." },
-          { icon: UserIcon, title: "Multi-User", desc: "Securely manage your own data with Supabase Authentication." }
-        ].map((feature, i) => (
-          <div key={i} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
-            <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center mb-4">
-              <feature.icon className="text-indigo-600 dark:text-indigo-400 w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">{feature.title}</h3>
-            <p className="text-slate-500 dark:text-slate-400 mt-2 text-sm leading-relaxed">{feature.desc}</p>
+    <div className="min-h-[calc(100vh-72px)] flex items-center justify-center bg-gradient-to-br from-slate-50 via-indigo-50 to-purple-50 dark:from-slate-950 dark:via-indigo-950 dark:to-purple-950 px-4 py-12">
+      <div className="w-full max-w-md">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center mb-8"
+        >
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-sm font-semibold mb-6">
+            <RefreshCw className="w-4 h-4" />
+            Real-time USD Tracking
           </div>
-        ))}
+          <h1 className="text-4xl font-bold text-slate-900 dark:text-white mb-2">
+            Track your wealth
+          </h1>
+          <p className="text-lg text-slate-600 dark:text-slate-400">
+            without borders
+          </p>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card className="overflow-hidden">
+            <div className="p-6">
+              <div className="flex gap-2 mb-6">
+                <Button
+                  variant={authMode === 'login' ? 'default' : 'ghost'}
+                  className="flex-1"
+                  onClick={() => setAuthMode('login')}
+                >
+                  Login
+                </Button>
+                <Button
+                  variant={authMode === 'register' ? 'default' : 'ghost'}
+                  className="flex-1"
+                  onClick={() => setAuthMode('register')}
+                >
+                  Register
+                </Button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {authMode === 'register' && (
+                  <div>
+                    <Label htmlFor="name">Name</Label>
+                    <Input
+                      id="name"
+                      type="text"
+                      placeholder="Your name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="mt-1"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="mt-1"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="mt-1"
+                    required
+                    minLength={6}
+                  />
+                </div>
+
+                {error && (
+                  <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+                    {error}
+                  </div>
+                )}
+
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={loading}
+                >
+                  {loading ? 'Please wait...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
+                </Button>
+              </form>
+
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <Separator />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">
+                    Or continue with
+                  </span>
+                </div>
+              </div>
+
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => signInWithGoogle()}
+                disabled={loading}
+              >
+                <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
+                  <path
+                    fill="currentColor"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="currentColor"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="currentColor"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                  />
+                  <path
+                    fill="currentColor"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                  />
+                </svg>
+                Google
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="mt-8 text-center text-sm text-slate-500 dark:text-slate-400"
+        >
+          By signing in, you agree to our Terms of Service and Privacy Policy
+        </motion.div>
       </div>
     </div>
   );
@@ -1923,7 +2056,12 @@ export default function App() {
       // Verify token is still valid by fetching user
       getUser(userId).then((userProfile) => {
         if (userProfile) {
-          setUser({ id: userId, email: userProfile.email });
+          setUser({ 
+            id: userId, 
+            email: userProfile.email,
+            displayName: userProfile.displayName,
+            avatarUrl: userProfile.avatarUrl,
+          });
           setProfile({
             uid: userId,
             email: userProfile.email,

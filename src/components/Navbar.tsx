@@ -18,6 +18,7 @@ import { ThemeContext } from '../context';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 interface NavbarProps {
   user: any;
@@ -89,6 +90,12 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
 
             {user ? (
               <div className="flex items-center gap-2 md:gap-3">
+                <Avatar className="w-9 h-9">
+                  <AvatarImage src={user.avatarUrl} alt={user.displayName || user.email} />
+                  <AvatarFallback className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-sm font-bold">
+                    {user.displayName?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
                 <div className="text-right hidden lg:block">
                   <p className="text-sm font-medium text-slate-900 dark:text-white">{user.user_metadata?.full_name || user.email}</p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">{profile?.baseCurrency || 'USD'}</p>
@@ -173,9 +180,12 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
 
               <div className="mt-auto pt-6 border-t border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 rounded-full flex items-center justify-center">
-                    <UserIcon className="text-indigo-600 dark:text-indigo-400 w-5 h-5" />
-                  </div>
+                  <Avatar className="w-10 h-10">
+                    <AvatarImage src={user.avatarUrl} alt={user.displayName || user.email} />
+                    <AvatarFallback className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                      {user.displayName?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{user.user_metadata?.full_name || user.email}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>

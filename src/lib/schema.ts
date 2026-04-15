@@ -6,6 +6,7 @@ export const users = pgTable('users', {
   id: text('id').primaryKey(), // Changed from uuid to text to support Google user IDs
   email: text('email').notNull().unique(),
   displayName: text('display_name'),
+  avatarUrl: text('avatar_url'),
   baseCurrency: text('base_currency').default('USD'),
   createdAt: timestamp('created_at').defaultNow(),
 });
