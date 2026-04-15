@@ -20,6 +20,7 @@ export interface User {
   email: string;
   displayName?: string;
   avatarUrl?: string;
+  role?: string;
   baseCurrency?: string;
   createdAt?: string;
 }

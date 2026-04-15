@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, numeric, primaryKey } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Users table
@@ -8,6 +8,7 @@ export const users = pgTable('users', {
   displayName: text('display_name'),
   avatarUrl: text('avatar_url'),
   baseCurrency: text('base_currency').default('USD'),
+  role: text('role').default('user'), // user, admin, superadmin
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -42,16 +43,19 @@ export const assets = pgTable('assets', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// Fund prices table (from TEFAS crawler)
+// Fund prices table (from TEFAS crawler) - Historical tracking
 export const fundPrices = pgTable('fund_prices', {
-  symbol: text('symbol').primaryKey(),
+  symbol: text('symbol').notNull(),
+  date: text('date').notNull(),
   price: numeric('price'),
+  priceUsd: numeric('price_usd'),
   name: text('name'),
   fundType: text('fund_type'),
   updatedAt: timestamp('updated_at').defaultNow(),
-  date: text('date'),
   source: text('source').default('tefas'),
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.symbol, table.date] }),
+}));
 
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({

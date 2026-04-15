@@ -32,6 +32,7 @@ import { Separator } from '@/components/ui/separator';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile, Portfolio, Asset } from './types';
 import { fetchStockPrice, fetchCryptoPrice, fetchTefasPrice, fetchPriceHistory } from './services/finance';
+import { AdminPanel } from './components/AdminPanel';
 import { 
   Plus, 
   TrendingUp, 
@@ -2026,7 +2027,7 @@ export default function App() {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'dashboard' | 'assets' | 'settings' | 'bes' | 'passive-income'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'assets' | 'settings' | 'bes' | 'passive-income' | 'admin'>('dashboard');
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -2061,6 +2062,7 @@ export default function App() {
             email: userProfile.email,
             displayName: userProfile.displayName,
             avatarUrl: userProfile.avatarUrl,
+            role: userProfile.role || 'user',
           });
           setProfile({
             uid: userId,
@@ -2198,30 +2200,36 @@ export default function App() {
     <AuthContext.Provider value={{ user, profile, loading }}>
       <ThemeContext.Provider value={{ isDark, toggleTheme }}>
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900 selection:text-indigo-900 dark:selection:text-indigo-100 transition-colors">
-          <Navbar user={user} profile={profile} currentView={view} setView={setView} />
+<Navbar user={user} profile={profile} currentView={view} setView={setView} />
           <main>
             {user ? (
-              view === 'settings' ? (
-                <Settings 
-                  profile={profile}
-                  onUpdateProfile={handleUpdateProfile}
-                  portfolios={portfolios} 
-                  onAddPortfolio={handleAddPortfolio} 
-                  onUpdatePortfolio={handleUpdatePortfolio}
-                  onDeletePortfolio={handleDeletePortfolio} 
-                />
-              ) : view === 'bes' ? (
-                <GovernmentContributionView 
-                  portfolios={portfolios}
-                  onUpdatePortfolio={handleUpdatePortfolio}
-                />
-              ) : view === 'passive-income' ? (
-                <PassiveIncomeView 
-                  portfolios={portfolios}
-                />
-              ) : (
-                <Dashboard view={view} portfolios={portfolios} setView={setView} />
-              )
+              <>
+                {view === 'admin' && <AdminPanel user={user} />}
+                {view === 'settings' && (
+                  <Settings 
+                    profile={profile}
+                    onUpdateProfile={handleUpdateProfile}
+                    portfolios={portfolios} 
+                    onAddPortfolio={handleAddPortfolio} 
+                    onUpdatePortfolio={handleUpdatePortfolio}
+                    onDeletePortfolio={handleDeletePortfolio} 
+                  />
+                )}
+                {view === 'bes' && (
+                  <GovernmentContributionView 
+                    portfolios={portfolios}
+                    profile={profile}
+                  />
+                )}
+                {view === 'passive-income' && (
+                  <PassiveIncomeView 
+                    assets={assets}
+                  />
+                )}
+                {(view === 'dashboard' || view === 'assets') && (
+                  <Dashboard view={view} portfolios={portfolios} setView={setView} />
+                )}
+              </>
             ) : (
               <LandingPage />
             )}

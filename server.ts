@@ -3,10 +3,16 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getStockPrice, getCryptoPrice, getTefasPrice, syncAllTefasPrices, getUsdTryRate, getHistoricalPrices } from "./services/finance.ts";
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import cron from 'node-cron';
+import { getStockPrice, getCryptoPrice, getUsdTryRate, getHistoricalPrices } from "./services/finance.ts";
+import { scrapeAllTefasFunds, scrapeSingleFund, getTefasPriceFromDB } from "./services/tefas-scraper.ts";
 import { db, users, portfolios, assets, fundPrices } from "./src/lib/db.ts";
 import { eq } from "drizzle-orm";
 import jwt from 'jsonwebtoken';
+
+const execAsync = promisify(exec);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '642674294207-agfrtso7m3pphppijaju0h9vhsq527sf.apps.googleusercontent.com';
@@ -25,6 +31,31 @@ function authMiddleware(req: any, res: any, next: any) {
     next();
   } catch (error) {
     return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+// Admin middleware
+async function adminMiddleware(req: any, res: any, next: any) {
+  try {
+    const userId = req.user.userId;
+    
+    console.log('[ADMIN MIDDLEWARE] Checking admin access for user:', userId);
+    
+    const user = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    
+    console.log('[ADMIN MIDDLEWARE] User role:', user[0]?.role);
+    
+    if (!user.length || (user[0].role !== 'admin' && user[0].role !== 'superadmin')) {
+      console.log('[ADMIN MIDDLEWARE] Access denied. Role:', user[0]?.role);
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    
+    console.log('[ADMIN MIDDLEWARE] Access granted. Role:', user[0].role);
+    req.user.role = user[0].role;
+    next();
+  } catch (error) {
+    console.error('[ADMIN MIDDLEWARE] Error:', error);
+    return res.status(500).json({ error: 'Failed to check admin status' });
   }
 }
 
@@ -112,7 +143,7 @@ async function startServer() {
       
       // Generate JWT
       const token = jwt.sign(
-        { userId, email: googleUser.email },
+        { userId, email: googleUser.email, role: user[0].role || 'user' },
         JWT_SECRET,
         { expiresIn: '7d' }
       );
@@ -124,6 +155,7 @@ async function startServer() {
           email: googleUser.email,
           displayName: user[0].displayName,
           avatarUrl: pictureUrl,
+          role: user[0].role || 'user',
         }
       });
     } catch (error) {
@@ -177,8 +209,20 @@ async function startServer() {
     console.log(`[API] TEFAS request for: ${symbol}`);
     
     try {
-      const price = await getTefasPrice(symbol);
-      res.json({ price });
+      const price = await getTefasPriceFromDB(symbol);
+      
+      if (price === null) {
+        console.log(`[API] ${symbol} not in DB. Attempting live scrape...`);
+        const scrapedPrice = await scrapeSingleFund(symbol);
+        
+        if (scrapedPrice !== null) {
+          res.json({ price: scrapedPrice });
+        } else {
+          res.status(404).json({ error: `Fund ${symbol} not found` });
+        }
+      } else {
+        res.json({ price });
+      }
     } catch (error) {
       console.error(`Error fetching TEFAS price for ${symbol}:`, error instanceof Error ? error.message : String(error));
       res.status(500).json({ error: "Failed to fetch TEFAS price" });
@@ -195,14 +239,132 @@ async function startServer() {
     }
   });
 
-  app.get("/api/tefas/sync", async (req, res) => {
+  app.get("/api/tefas/scrape", async (req, res) => {
     try {
-      console.log("[API] Starting TEFAS sync...");
-      const result = await syncAllTefasPrices();
-      res.json(result);
+      console.log("[API] Manual TEFAS scrape triggered via button...");
+      
+      const scriptPath = path.join(process.cwd(), 'scripts', 'tefas_daily_scraper_with_usd.py');
+      
+      // Execute Python scraper asynchronously
+      const { stdout, stderr } = await execAsync(`python3 ${scriptPath}`, { 
+        timeout: 300000,
+        maxBuffer: 1024 * 1024 * 10
+      });
+      
+      console.log("[API] Scrape completed");
+      
+      // Parse output for stats
+      const savedMatch = stdout.match(/Saved (\d+) funds/);
+      const datesMatch = stdout.match(/Historical dates: (\d+) days/);
+      const recordsMatch = stdout.match(/Total records: (\d+)/);
+      const durationMatch = stdout.match(/Completed in ([\d.]+) seconds/);
+      
+      const saved = savedMatch ? parseInt(savedMatch[1]) : 0;
+      const dates = datesMatch ? parseInt(datesMatch[1]) : 0;
+      const records = recordsMatch ? parseInt(recordsMatch[1]) : 0;
+      const duration = durationMatch ? parseFloat(durationMatch[1]) : 0;
+      
+      res.json({
+        success: true,
+        saved,
+        dates,
+        records,
+        duration,
+        message: `Successfully scraped ${saved} funds in ${duration}s`,
+        output: stdout.slice(-500), // Last 500 chars
+        stderr: stderr || null
+      });
+      
+    } catch (error: any) {
+      console.error("[API] TEFAS scrape failed:", error);
+      
+      res.status(500).json({ 
+        success: false,
+        error: "Scrape failed", 
+        details: error.message,
+        stderr: error.stderr || null,
+        stdout: error.stdout ? error.stdout.slice(-500) : null
+      });
+    }
+  });
+
+  app.post("/api/tefas/bulk-update", async (req, res) => {
+    try {
+      const { funds } = req.body;
+      
+      if (!Array.isArray(funds)) {
+        return res.status(400).json({ error: 'Invalid data format. Expected array of funds.' });
+      }
+      
+      console.log(`[API] Bulk updating ${funds.length} TEFAS funds...`);
+      
+      let updated = 0;
+      let failed = 0;
+      
+      for (const fund of funds) {
+        try {
+          const { symbol, price, name, fundType, date } = fund;
+          
+          if (!symbol || !price) {
+            failed++;
+            continue;
+          }
+          
+          await db.insert(fundPrices)
+            .values({
+              symbol: symbol.toUpperCase(),
+              price: String(price),
+              name: name || null,
+              fundType: fundType || null,
+              date: date || new Date().toISOString().split('T')[0],
+              source: 'tefas',
+            })
+            .onConflictDoUpdate({
+              target: fundPrices.symbol,
+              set: {
+                price: String(price),
+                name: name || null,
+                fundType: fundType || null,
+                date: date || new Date().toISOString().split('T')[0],
+                updatedAt: new Date(),
+              },
+            });
+          
+          updated++;
+        } catch (err) {
+          console.error(`[TEFAS] Failed to update ${fund.symbol}:`, err);
+          failed++;
+        }
+      }
+      
+      res.json({ 
+        success: true, 
+        updated, 
+        failed,
+        message: `Updated ${updated} funds, ${failed} failed` 
+      });
     } catch (error) {
-      console.error("[API] TEFAS sync failed:", error);
-      res.status(500).json({ error: "Sync failed", details: error instanceof Error ? error.message : String(error) });
+      console.error("[API] TEFAS bulk update failed:", error);
+      res.status(500).json({ error: "Bulk update failed", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/tefas/funds", async (req, res) => {
+    try {
+      const allFunds = await db.select({
+        symbol: fundPrices.symbol,
+        price: fundPrices.price,
+        priceUsd: fundPrices.priceUsd,
+        name: fundPrices.name,
+        fundType: fundPrices.fundType,
+        date: fundPrices.date,
+        source: fundPrices.source,
+        updatedAt: fundPrices.updatedAt,
+      }).from(fundPrices).orderBy(fundPrices.symbol);
+      res.json(allFunds);
+    } catch (error) {
+      console.error("[API] Failed to fetch funds:", error);
+      res.status(500).json({ error: "Failed to fetch funds" });
     }
   });
 
@@ -225,6 +387,85 @@ async function startServer() {
       res.json(result[0]);
     } catch (error) {
       res.status(500).json({ error: "Failed to create user" });
+    }
+  });
+
+  // Admin API routes
+  app.get("/api/admin/users", authMiddleware, adminMiddleware, async (req: any, res) => {
+    try {
+      const allUsers = await db.select({
+        id: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        role: users.role,
+        createdAt: users.createdAt,
+      }).from(users);
+      res.json(allUsers);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id/role", authMiddleware, adminMiddleware, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { role } = req.body;
+      
+      if (!['user', 'admin', 'superadmin'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid role' });
+      }
+      
+      const result = await db.update(users)
+        .set({ role })
+        .where(eq(users.id, id))
+        .returning();
+      
+      if (result.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      
+      res.json(result[0]);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update role" });
+    }
+  });
+
+  app.delete("/api/admin/users/:id", authMiddleware, adminMiddleware, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      
+      // Prevent self-deletion
+      if (id === req.user.userId) {
+        return res.status(400).json({ error: 'Cannot delete your own account' });
+      }
+      
+      const result = await db.delete(users).where(eq(users.id, id)).returning();
+      
+      if (result.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      
+      res.json({ success: true, deleted: result[0] });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  app.get("/api/admin/stats", authMiddleware, adminMiddleware, async (req: any, res) => {
+    try {
+      const userCount = await db.select().from(users);
+      const portfolioCount = await db.select().from(portfolios);
+      const assetCount = await db.select().from(assets);
+      const fundCount = await db.select().from(fundPrices);
+      
+      res.json({
+        users: userCount.length,
+        portfolios: portfolioCount.length,
+        assets: assetCount.length,
+        funds: fundCount.length,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch stats" });
     }
   });
 
@@ -360,9 +601,37 @@ async function startServer() {
     });
   }
 
+  // Setup TEFAS daily scrape cron job
+  console.log('[CRON] Setting up TEFAS daily scrape job...');
+  
+  cron.schedule('0 9 * * *', async () => {
+    console.log('[CRON] ⏰ Daily TEFAS scrape triggered (09:00 Istanbul time)');
+    try {
+      const result = await scrapeAllTefasFunds();
+      console.log(`[CRON] Scrape completed: ${result.updated}/${result.total} funds updated`);
+    } catch (error) {
+      console.error('[CRON] Daily scrape failed:', error);
+    }
+  }, {
+    timezone: 'Europe/Istanbul',
+  });
+
+  cron.schedule('0 18 * * *', async () => {
+    console.log('[CRON] ⏰ Evening TEFAS scrape triggered (18:00 Istanbul time)');
+    try {
+      const result = await scrapeAllTefasFunds();
+      console.log(`[CRON] Scrape completed: ${result.updated}/${result.total} funds updated`);
+    } catch (error) {
+      console.error('[CRON] Evening scrape failed:', error);
+    }
+  }, {
+    timezone: 'Europe/Istanbul',
+  });
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);
     console.log(`[SERVER] NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+    console.log('[SERVER] TEFAS cron jobs active: 09:00 and 18:00 Istanbul time');
     
     // Health checks (non-blocking)
     if (process.env.NODE_ENV !== "production") {

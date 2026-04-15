@@ -24,7 +24,7 @@ interface NavbarProps {
   user: any;
   profile: UserProfile | null;
   currentView: string;
-  setView: (v: 'dashboard' | 'assets' | 'settings' | 'bes' | 'passive-income') => void;
+  setView: (v: 'dashboard' | 'assets' | 'settings' | 'bes' | 'passive-income' | 'admin') => void;
 }
 
 export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
@@ -38,6 +38,12 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
     { id: 'bes', label: 'Devlet Katkısı', icon: Shield, color: 'rose' },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
+
+  // Add admin menu for admin/superadmin
+  const adminItem = { id: 'admin', label: 'Admin', icon: Shield, color: 'purple' };
+  const allNavItems = user && (user.role === 'admin' || user.role === 'superadmin') 
+    ? [...navItems, adminItem] 
+    : navItems;
 
   const handleNavClick = (view: any) => {
     setView(view);
@@ -58,7 +64,7 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
 
             {user && (
               <div className="hidden md:flex items-center gap-1">
-                {navItems.map((item) => (
+                {allNavItems.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => setView(item.id as any)}
@@ -67,11 +73,12 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
                       currentView === item.id 
                         ? item.color === 'emerald' ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400"
                         : item.color === 'rose' ? "bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400"
+                        : item.color === 'purple' ? "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
                         : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400"
                         : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                     )}
                   >
-                    {item.id === 'bes' || item.id === 'passive-income' ? <item.icon className="w-4 h-4" /> : null}
+                    {item.id === 'bes' || item.id === 'passive-income' || item.id === 'admin' ? <item.icon className="w-4 h-4" /> : null}
                     {item.label}
                   </button>
                 ))}
@@ -159,7 +166,7 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
               </div>
 
               <div className="flex-1 space-y-2">
-                {navItems.map((item) => (
+                {allNavItems.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => handleNavClick(item.id as any)}
@@ -168,6 +175,7 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
                       currentView === item.id 
                         ? item.color === 'emerald' ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400"
                         : item.color === 'rose' ? "bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400"
+                        : item.color === 'purple' ? "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
                         : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400"
                         : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
                     )}

@@ -5,6 +5,7 @@ export interface UserProfile {
   baseCurrency: 'USD';
   birthDate?: string; // ISO format
   besEntryDate?: string; // ISO format
+  role?: string; // user, admin, superadmin
 }
 
 export interface Portfolio {
