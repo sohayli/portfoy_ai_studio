@@ -13,7 +13,7 @@ import {
   LayoutDashboard,
   Wallet
 } from 'lucide-react';
-import { auth, signOut, signInWithPopup, googleProvider } from '../lib/firebase';
+import { signInWithGoogle, signOut } from '../lib/api';
 import { ThemeContext } from '../context';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
@@ -90,11 +90,11 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
             {user ? (
               <div className="flex items-center gap-2 md:gap-3">
                 <div className="text-right hidden lg:block">
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">{user.displayName}</p>
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">{user.user_metadata?.full_name || user.email}</p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">{profile?.baseCurrency || 'USD'}</p>
                 </div>
                 <button 
-                  onClick={() => signOut(auth)}
+                  onClick={() => signOut()}
                   className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors hidden sm:block"
                   title="Sign Out"
                 >
@@ -111,7 +111,7 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
               </div>
             ) : (
               <button 
-                onClick={() => signInWithPopup(auth, googleProvider)}
+                onClick={() => signInWithGoogle()}
                 className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
               >
                 Sign In
@@ -177,13 +177,13 @@ export function Navbar({ user, profile, currentView, setView }: NavbarProps) {
                     <UserIcon className="text-indigo-600 dark:text-indigo-400 w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{user.displayName}</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{user.user_metadata?.full_name || user.email}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
                   </div>
                 </div>
                 <button
                   onClick={() => {
-                    signOut(auth);
+                    signOut();
                     setIsMenuOpen(false);
                   }}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 text-sm font-bold hover:bg-rose-100 transition-colors"

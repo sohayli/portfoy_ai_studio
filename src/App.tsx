@@ -3,22 +3,25 @@ import * as d3 from 'd3';
 import Papa from 'papaparse';
 import { AuthContext, ThemeContext } from './context';
 import { 
-  auth, 
-  googleProvider, 
-  signInWithPopup, 
-  signOut, 
-  db, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  serverTimestamp,
-  collection,
-  collectionGroup,
-  query,
-  where,
-  onSnapshot,
-  deleteDoc
-} from './lib/firebase';
+  getUser,
+  createUser,
+  getPortfolios,
+  createPortfolio,
+  updatePortfolio,
+  deletePortfolio,
+  getAssetsByUser,
+  getAssetsByPortfolio,
+  createAsset,
+  updateAsset,
+  deleteAsset,
+  signInWithGoogle,
+  signOut,
+  getCurrentUserId,
+  getAuthToken,
+  User as APIUser,
+  Portfolio as APIPortfolio,
+  Asset as APIAsset
+} from './lib/api';
 import { cn, formatCurrency, formatNumber } from './lib/utils';
 import { 
   Plus, 
@@ -153,48 +156,60 @@ function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClos
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (header) => header.trim().toLowerCase().replace(/['"]/g, ''),
       complete: (results) => {
         try {
-          const importedAssets: Omit<Asset, 'id' | 'portfolioId'>[] = results.data.map((row: any) => {
-            // Mapping logic based on the provided CSV format
-            // Headers often have extra quotes or commas in the user's example
-            const getVal = (keys: string[]) => {
+          console.log('[CSV] Parsing complete', { rows: results.data.length, headers: results.meta.fields });
+          
+          const importedAssets: Omit<Asset, 'id' | 'portfolioId'>[] = results.data.map((row: any, index: number) => {
+            console.log(`[CSV] Row ${index}:`, row);
+            
+            // Get value by checking multiple possible column names
+            const getVal = (keys: string[]): string => {
               for (const key of keys) {
-                const foundKey = Object.keys(row).find(k => k.toLowerCase().includes(key.toLowerCase()));
-                if (foundKey) return row[foundKey];
+                const value = row[key.toLowerCase()] || row[key];
+                if (value) return String(value);
               }
               return '';
             };
 
-            const symbol = getVal(['Holding']).replace(/,/g, '').trim();
-            const name = getVal(['Holdings\' name', 'Name']).trim();
-            const shares = parseFloat(getVal(['Shares', 'Quantity']).replace(/,/g, '')) || 0;
-            const costBasis = parseFloat(getVal(['Cost basis']).replace(/,/g, '')) || 0;
-            const category = getVal(['Category']).toLowerCase();
+            const symbol = getVal(['holding', 'symbol', 'ticker']).replace(/,/g, '').trim();
+            const name = getVal(['holdings name', 'name', 'holdings\' name']).trim();
+            const sharesStr = getVal(['shares', 'quantity', 'units']).replace(/,/g, '');
+            const shares = parseFloat(sharesStr) || 0;
+            const costBasisStr = getVal(['cost basis', 'cost', 'total cost']).replace(/,/g, '');
+            const costBasis = parseFloat(costBasisStr) || 0;
+            const category = getVal(['category', 'type', 'asset type']).toLowerCase();
+            
+            if (!symbol || shares <= 0) {
+              console.warn(`[CSV] Skipping row ${index}: invalid data`);
+              return null;
+            }
             
             let type: Asset['type'] = 'Stock';
             let tefasType: Asset['tefasType'] = undefined;
 
-            if (category.includes('crypto')) {
+            if (category.includes('crypto') || category.includes('bitcoin') || category.includes('ethereum')) {
               type = 'Crypto';
-            } else if (category.includes('commodity') || category.includes('gold')) {
+            } else if (category.includes('commodity') || category.includes('gold') || category.includes('silver')) {
               type = 'Commodity';
-            } else if (category.includes('cash')) {
+            } else if (category.includes('cash') || category.includes('money')) {
               type = 'Cash';
-            } else if (category.includes('bes') || category.includes('katkı') || category.includes('devlet')) {
+            } else if (category.includes('bes') || category.includes('katkı') || category.includes('devlet') || category.includes('pension')) {
               type = 'GovernmentContribution';
               tefasType = 'EMK';
-            } else if (category.includes('fund') || category.includes('fon')) {
+            } else if (category.includes('fund') || category.includes('fon') || category.includes('mutual')) {
               type = 'Fund';
-              tefasType = 'YAT'; // Default for funds
+              tefasType = 'YAT';
             }
 
             const purchasePrice = shares > 0 ? costBasis / shares : 0;
-            const dividendYield = parseFloat(getVal(['Dividend Yield', 'Yield', 'Temettü', 'Verim']).replace(/%/g, '').replace(/,/g, '')) / 100 || 0;
+            const dividendYieldStr = getVal(['dividend yield', 'yield', 'temettü', 'verim']).replace(/%/g, '').replace(/,/g, '');
+            const dividendYield = parseFloat(dividendYieldStr) / 100 || 0;
 
             return {
-              symbol: symbol || 'UNKNOWN',
-              name: name || symbol || 'Unknown Asset',
+              symbol: symbol.toUpperCase(),
+              name: name || symbol.toUpperCase(),
               quantity: shares,
               purchasePrice: purchasePrice,
               purchaseCurrency: 'USD' as const,
@@ -202,22 +217,26 @@ function CSVImportModal({ isOpen, onClose, onImport }: { isOpen: boolean; onClos
               tefasType: tefasType,
               dividendYield: dividendYield > 0 ? dividendYield : undefined
             };
-          }).filter(asset => asset.quantity > 0);
+          }).filter((asset): asset is NonNullable<typeof asset> => asset !== null && asset.quantity > 0);
+
+          console.log('[CSV] Valid assets:', importedAssets.length);
 
           if (importedAssets.length === 0) {
-            throw new Error("No valid assets found in CSV. Please check the format.");
+            throw new Error("No valid assets found in CSV. Expected columns: Holding/Symbol, Shares/Quantity, Cost Basis");
           }
 
           onImport(importedAssets);
           setFile(null);
           onClose();
         } catch (err: any) {
-          setError(err.message || "Failed to parse CSV. Please ensure it matches the expected format.");
+          console.error('[CSV] Parse error:', err);
+          setError(err.message || "Failed to parse CSV");
         } finally {
           setIsProcessing(false);
         }
       },
       error: (err) => {
+        console.error('[CSV] Papa error:', err);
         setError("Error reading file: " + err.message);
         setIsProcessing(false);
       }
@@ -834,20 +853,45 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
       return;
     }
 
-    const q = selectedPortfolioId === 'all'
-      ? query(collectionGroup(db, 'assets'), where('ownerId', '==', authContext.user.uid))
-      : query(
-          collection(db, `portfolios/${selectedPortfolioId}/assets`),
-          where('ownerId', '==', authContext.user.uid)
-        );
+    const loadAssets = async () => {
+      try {
+        const assetsData = selectedPortfolioId === 'all'
+          ? await getAssetsByUser(authContext.user.id)
+          : await getAssetsByPortfolio(selectedPortfolioId);
+        
+        // Convert numeric strings to numbers
+        setAssets(assetsData.map((a: any) => ({
+          id: a.id,
+          portfolioId: a.portfolioId,
+          ownerId: a.ownerId,
+          symbol: a.symbol,
+          name: a.name,
+          quantity: parseFloat(a.quantity || '0'),
+          purchasePrice: parseFloat(a.purchasePrice || '0'),
+          purchaseCurrency: a.purchaseCurrency,
+          type: a.type,
+          tefasType: a.tefasType,
+          currentPrice: a.currentPrice ? parseFloat(a.currentPrice) : undefined,
+          dividendYield: a.dividendYield,
+          dividendGrowth5Y: a.dividendGrowth5Y,
+          dividendGrowth10Y: a.dividendGrowth10Y,
+          createdAt: a.createdAt,
+        } as Asset)));
+      } catch (error) {
+        console.error("Assets fetch error:", error);
+      }
+    };
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-    }, (error) => {
-      console.error("Assets snapshot error:", error);
-    });
+    loadAssets();
 
-    return () => unsubscribe();
+    // TODO: Enable realtime after fixing subscription issue
+    // const subscription = selectedPortfolioId === 'all'
+    //   ? subscribeToPortfolios(authContext.user.id, () => loadAssets())
+    //   : subscribeToAssets(selectedPortfolioId, () => loadAssets());
+
+    // return () => {
+    //   subscription.unsubscribe();
+    // };
   }, [selectedPortfolioId, authContext?.user]);
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -888,8 +932,7 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
           if (dividendGrowth10Y !== undefined && dividendGrowth10Y !== asset.dividendGrowth10Y) updates.dividendGrowth10Y = dividendGrowth10Y;
 
           if (Object.keys(updates).length > 0) {
-            const assetRef = doc(db, `portfolios/${asset.portfolioId}/assets`, asset.id);
-            await setDoc(assetRef, updates, { merge: true });
+            await updateAsset(asset.id, updates);
           }
           
           // Small delay between assets
@@ -930,8 +973,6 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
   const handleAddAsset = async (assetData: Omit<Asset, 'id' | 'portfolioId'>) => {
     if (!selectedPortfolioId || !authContext?.user) return;
     try {
-      const newDocRef = doc(collection(db, `portfolios/${selectedPortfolioId}/assets`));
-      
       // Fetch initial price immediately
       let initialPrice: number | null = null;
       let initialDividendYield = assetData.dividendYield || null;
@@ -963,25 +1004,41 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
       }
 
       const dataToSave = {
-        ...assetData,
+        portfolioId: selectedPortfolioId,
+        ownerId: authContext.user.id,
+        symbol: assetData.symbol,
+        name: assetData.name,
+        quantity: assetData.quantity,
+        purchasePrice: assetData.purchasePrice,
+        purchaseCurrency: assetData.purchaseCurrency || 'USD',
+        type: assetData.type,
+        tefasType: assetData.tefasType,
         currentPrice: initialPrice,
         dividendYield: initialDividendYield,
         dividendGrowth5Y: initialDividendGrowth5Y,
         dividendGrowth10Y: initialDividendGrowth10Y,
-        id: newDocRef.id,
-        portfolioId: selectedPortfolioId,
-        ownerId: authContext.user.uid,
-        createdAt: serverTimestamp()
       };
 
-      // Remove undefined fields for Firestore compatibility
-      Object.keys(dataToSave).forEach(key => {
-        if ((dataToSave as any)[key] === undefined) {
-          delete (dataToSave as any)[key];
-        }
-      });
-
-      await setDoc(newDocRef, dataToSave);
+      const newAsset = await createAsset(dataToSave);
+      
+      // Add new asset to state
+      setAssets(prev => [...prev, {
+        id: newAsset.id,
+        portfolioId: newAsset.portfolioId,
+        ownerId: newAsset.ownerId,
+        symbol: newAsset.symbol,
+        name: newAsset.name,
+        quantity: parseFloat(String(newAsset.quantity || 0)),
+        purchasePrice: parseFloat(String(newAsset.purchasePrice || 0)),
+        purchaseCurrency: newAsset.purchaseCurrency,
+        type: newAsset.type,
+        tefasType: newAsset.tefasType,
+        currentPrice: newAsset.currentPrice ? parseFloat(String(newAsset.currentPrice)) : undefined,
+        dividendYield: newAsset.dividendYield,
+        dividendGrowth5Y: newAsset.dividendGrowth5Y,
+        dividendGrowth10Y: newAsset.dividendGrowth10Y,
+        createdAt: newAsset.createdAt,
+      } as Asset]);
     } catch (err) {
       console.error("Error adding asset:", err);
     }
@@ -990,24 +1047,12 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
   const handleEditAsset = async (assetId: string, updates: Partial<Asset>) => {
     if (!selectedPortfolioId || !authContext?.user) return;
     try {
-      const assetRef = doc(db, `portfolios/${selectedPortfolioId}/assets`, assetId);
+      const updated = await updateAsset(assetId, updates as any);
       
-      // If symbol or type changed, we might want to reset currentPrice to trigger a re-fetch
-      const currentAsset = assets.find(a => a.id === assetId);
-      const dataToSave = { ...updates };
-
-      if (updates.symbol && updates.symbol !== currentAsset?.symbol) {
-        (dataToSave as any).currentPrice = null;
-      }
-
-      // Remove undefined fields
-      Object.keys(dataToSave).forEach(key => {
-        if ((dataToSave as any)[key] === undefined) {
-          delete (dataToSave as any)[key];
-        }
-      });
-
-      await setDoc(assetRef, dataToSave, { merge: true });
+      // Update asset in state
+      setAssets(prev => prev.map(a => 
+        a.id === assetId ? { ...a, ...updated, quantity: parseFloat(String(updated.quantity || a.quantity)), purchasePrice: parseFloat(String(updated.purchasePrice || a.purchasePrice)) } : a
+      ));
     } catch (err) {
       console.error("Error editing asset:", err);
     }
@@ -1016,7 +1061,10 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
   const handleDeleteAsset = async (assetId: string) => {
     if (!selectedPortfolioId) return;
     try {
-      await deleteDoc(doc(db, `portfolios/${selectedPortfolioId}/assets`, assetId));
+      await deleteAsset(assetId);
+      
+      // Remove asset from state
+      setAssets(prev => prev.filter(a => a.id !== assetId));
     } catch (err) {
       console.error("Error deleting asset:", err);
     }
@@ -1025,10 +1073,9 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
   const handleDeleteAllAssets = async () => {
     if (!selectedPortfolioId || assets.length === 0) return;
     try {
-      const promises = assets.map(asset => 
-        deleteDoc(doc(db, `portfolios/${selectedPortfolioId}/assets`, asset.id))
-      );
-      await Promise.all(promises);
+      for (const asset of assets) {
+        await deleteAsset(asset.id);
+      }
     } catch (err) {
       console.error("Error deleting all assets:", err);
     }
@@ -1040,8 +1087,6 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
     try {
       // Process imports in batches or sequence to fetch initial prices
       for (const asset of importedAssets) {
-        const newDocRef = doc(collection(db, `portfolios/${selectedPortfolioId}/assets`));
-        
         let initialPrice: number | null = null;
         let initialDividendYield = asset.dividendYield || null;
         let initialDividendGrowth5Y = asset.dividendGrowth5Y || null;
@@ -1066,30 +1111,50 @@ function Dashboard({ view, portfolios, setView }: { view: 'dashboard' | 'assets'
         }
 
         const dataToSave = {
-          ...asset,
+          portfolioId: selectedPortfolioId,
+          ownerId: authContext.user.id,
+          symbol: asset.symbol,
+          name: asset.name,
+          quantity: asset.quantity,
+          purchasePrice: asset.purchasePrice,
+          purchaseCurrency: asset.purchaseCurrency || 'USD',
+          type: asset.type,
+          tefasType: asset.tefasType,
           currentPrice: initialPrice,
           dividendYield: initialDividendYield,
           dividendGrowth5Y: initialDividendGrowth5Y,
           dividendGrowth10Y: initialDividendGrowth10Y,
-          id: newDocRef.id,
-          portfolioId: selectedPortfolioId,
-          ownerId: authContext.user.uid,
-          createdAt: serverTimestamp()
         };
 
-        // Remove undefined fields
-        Object.keys(dataToSave).forEach(key => {
-          if ((dataToSave as any)[key] === undefined) {
-            delete (dataToSave as any)[key];
-          }
-        });
-
-        await setDoc(newDocRef, dataToSave);
-        // Small delay to avoid overwhelming the API during bulk import
-        await new Promise(resolve => setTimeout(resolve, 500));
+        const newAsset = await createAsset(dataToSave);
+        
+        // Add each imported asset to state immediately
+        setAssets(prev => [...prev, {
+          id: newAsset.id,
+          portfolioId: newAsset.portfolioId,
+          ownerId: newAsset.ownerId,
+          symbol: newAsset.symbol,
+          name: newAsset.name,
+          quantity: parseFloat(String(newAsset.quantity || 0)),
+          purchasePrice: parseFloat(String(newAsset.purchasePrice || 0)),
+          purchaseCurrency: newAsset.purchaseCurrency,
+          type: newAsset.type,
+          tefasType: newAsset.tefasType,
+          currentPrice: newAsset.currentPrice ? parseFloat(String(newAsset.currentPrice)) : undefined,
+          dividendYield: newAsset.dividendYield,
+          dividendGrowth5Y: newAsset.dividendGrowth5Y,
+          dividendGrowth10Y: newAsset.dividendGrowth10Y,
+          createdAt: newAsset.createdAt,
+        } as Asset]);
+        
+        // Small delay between imports
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
+      
+      console.log('[IMPORT] Successfully imported', importedAssets.length, 'assets');
     } catch (err) {
       console.error("Error importing assets:", err);
+      throw err;
     }
   };
 
@@ -1792,7 +1857,7 @@ function LandingPage() {
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <button 
-            onClick={() => signInWithPopup(auth, googleProvider)}
+            onClick={() => signInWithGoogle()}
             className="w-full sm:w-auto bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 dark:shadow-none flex items-center justify-center gap-2"
           >
             Get Started Free
@@ -1808,7 +1873,7 @@ function LandingPage() {
         {[
           { icon: Wallet, title: "Multi-Portfolio", desc: "Organize assets into sub-portfolios like Retirement or Kids Fund." },
           { icon: RefreshCw, title: "Live Prices", desc: "Get real-time price updates for stocks, crypto, and funds." },
-          { icon: UserIcon, title: "Multi-User", desc: "Securely manage your own data with Firebase Authentication." }
+          { icon: UserIcon, title: "Multi-User", desc: "Securely manage your own data with Supabase Authentication." }
         ].map((feature, i) => (
           <div key={i} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
             <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center mb-4">
@@ -1851,47 +1916,37 @@ export default function App() {
   const toggleTheme = () => setIsDark(prev => !prev);
 
   useEffect(() => {
-    // Safety timeout: force loading to false after 10 seconds if Firebase hasn't responded
-    const safetyTimeout = setTimeout(() => {
-      setLoading(false);
-    }, 10000);
-
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      try {
-        setUser(user);
-        if (user) {
-          // Check if profile exists
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (!userDoc.exists()) {
-            const newProfile: UserProfile = {
-              uid: user.uid,
-              email: user.email || '',
-              displayName: user.displayName || '',
-              baseCurrency: 'USD',
-            };
-            await setDoc(doc(db, 'users', user.uid), {
-              ...newProfile,
-              createdAt: serverTimestamp()
-            });
-            setProfile(newProfile);
-          } else {
-            setProfile(userDoc.data() as UserProfile);
-          }
+    const token = getAuthToken();
+    const userId = getCurrentUserId();
+    
+    if (token && userId) {
+      // Verify token is still valid by fetching user
+      getUser(userId).then((userProfile) => {
+        if (userProfile) {
+          setUser({ id: userId, email: userProfile.email });
+          setProfile({
+            uid: userId,
+            email: userProfile.email,
+            displayName: userProfile.displayName || userProfile.email,
+            baseCurrency: userProfile.baseCurrency || 'USD',
+          } as UserProfile);
+          // Set view to dashboard after successful login
+          setView('dashboard');
         } else {
-          setProfile(null);
+          // Token invalid - clear storage
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('userId');
         }
-      } catch (error) {
-        console.error("Auth state change error:", error);
-      } finally {
         setLoading(false);
-        clearTimeout(safetyTimeout);
-      }
-    });
-
-    return () => {
-      unsubscribe();
-      clearTimeout(safetyTimeout);
-    };
+      }).catch((err) => {
+        console.error('[AUTH] Token verification failed:', err);
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('userId');
+        setLoading(false);
+      });
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -1900,31 +1955,51 @@ export default function App() {
       return;
     }
 
-    const q = query(collection(db, 'portfolios'), where('ownerId', '==', user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const pData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Portfolio));
-      setPortfolios(pData);
-    }, (error) => {
-      console.error("Portfolios snapshot error:", error);
-    });
+    const loadPortfolios = async () => {
+      try {
+        console.log('[DEBUG] Loading portfolios for user:', user.id);
+        const portfoliosData = await getPortfolios(user.id);
+        console.log('[DEBUG] Portfolios fetched:', portfoliosData);
+        setPortfolios(portfoliosData.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description || '',
+          ownerId: p.ownerId,
+          createdAt: p.createdAt,
+          monthlyGoal: p.monthlyGoal,
+          birthDate: p.birthDate,
+          besEntryDate: p.besEntryDate,
+        } as Portfolio)));
+      } catch (error) {
+        console.error("Portfolios fetch error:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    loadPortfolios();
   }, [user]);
 
   const handleAddPortfolio = async (name: string, description: string, monthlyGoal: number, birthDate?: string, besEntryDate?: string) => {
     if (!user) return;
     try {
-      const newDocRef = doc(collection(db, 'portfolios'));
-      await setDoc(newDocRef, {
-        id: newDocRef.id,
+      const newPortfolio = await createPortfolio({
+        ownerId: user.id,
         name,
         description,
-        monthlyGoal,
-        birthDate: birthDate || null,
-        besEntryDate: besEntryDate || null,
-        ownerId: user.uid,
-        createdAt: serverTimestamp()
       });
+      
+      // Add new portfolio to state immediately
+      setPortfolios(prev => [...prev, {
+        id: newPortfolio.id,
+        name: newPortfolio.name,
+        description: newPortfolio.description || '',
+        ownerId: newPortfolio.ownerId,
+        createdAt: newPortfolio.createdAt,
+        monthlyGoal: newPortfolio.monthlyGoal,
+        birthDate: newPortfolio.birthDate,
+        besEntryDate: newPortfolio.besEntryDate,
+      } as Portfolio]);
+      
+      console.log('[PORTFOLIO] Added successfully:', newPortfolio);
     } catch (err) {
       console.error("Error adding portfolio:", err);
     }
@@ -1933,7 +2008,15 @@ export default function App() {
   const handleUpdatePortfolio = async (id: string, updates: Partial<Portfolio>) => {
     if (!user) return;
     try {
-      await setDoc(doc(db, 'portfolios', id), updates, { merge: true });
+      const updated = await updatePortfolio(id, {
+        name: updates.name,
+        description: updates.description
+      });
+      
+      // Update portfolio in state
+      setPortfolios(prev => prev.map(p => 
+        p.id === id ? { ...p, ...updated } : p
+      ));
     } catch (err) {
       console.error("Error updating portfolio:", err);
     }
@@ -1942,13 +2025,10 @@ export default function App() {
   const handleDeletePortfolio = async (id: string) => {
     if (!user) return;
     try {
-      // Delete all assets in portfolio first
-      const assetsQ = query(collection(db, `portfolios/${id}/assets`));
-      const assetsSnapshot = await getDoc(doc(db, 'portfolios', id)); // This is just to check existence, wait
-      // Actually we need to get all docs in the subcollection
-      // But we can just delete the portfolio doc if rules allow or if we want to be clean
-      // For now, just delete the portfolio doc. In production, you'd want a cloud function to clean up subcollections.
-      await deleteDoc(doc(db, 'portfolios', id));
+      await deletePortfolio(id);
+      
+      // Remove portfolio from state
+      setPortfolios(prev => prev.filter(p => p.id !== id));
     } catch (err) {
       console.error("Error deleting portfolio:", err);
     }
@@ -1957,7 +2037,8 @@ export default function App() {
   const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) return;
     try {
-      await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
+      // Profile updates not yet implemented in Supabase helper
+      console.log("Profile updates not yet implemented:", updates);
       setProfile(prev => prev ? { ...prev, ...updates } : null);
     } catch (err) {
       console.error("Error updating profile:", err);

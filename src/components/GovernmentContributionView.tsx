@@ -12,7 +12,7 @@ import { Portfolio, Asset } from '../types';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { cn, formatCurrency } from '../lib/utils';
-import { db, collectionGroup, query, where, onSnapshot } from '../lib/firebase';
+import { getAssetsByUser } from '../lib/api';
 import { AuthContext } from '../context';
 
 interface GovernmentContributionViewProps {
@@ -34,14 +34,26 @@ export function GovernmentContributionView({ portfolios, onUpdatePortfolio }: Go
       return;
     }
 
-    const q = query(collectionGroup(db, 'assets'), where('ownerId', '==', authContext.user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-    }, (error) => {
-      console.error("Assets snapshot error in BES view:", error);
-    });
+    const loadAssets = async () => {
+      try {
+        const assetsData = await getAssetsByUser(authContext.user.id);
+        setAssets(assetsData.map((a: any) => ({
+          id: a.id,
+          portfolioId: a.portfolioId,
+          symbol: a.symbol,
+          name: a.name,
+          quantity: parseFloat(a.quantity),
+          purchasePrice: parseFloat(a.purchasePrice),
+          type: a.type,
+          currentPrice: a.currentPrice ? parseFloat(a.currentPrice) : undefined,
+          dividendYield: a.dividendYield,
+        } as Asset)));
+      } catch (error) {
+        console.error("Assets fetch error in BES view:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    loadAssets();
   }, [authContext?.user]);
 
   const calculateVestingPercentage = (birthDate?: string, besEntryDate?: string) => {

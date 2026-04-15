@@ -1,78 +1,91 @@
 import os
 from dotenv import load_dotenv
-import firebase_admin
-from firebase_admin import credentials, firestore
 from crawler import TefasCrawler
 from datetime import datetime
 import logging
+from supabase import create_client, Client
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-def initialize_firebase():
-    """
-    Initializes Firebase using a service account key.
-    Make sure to place your service-account.json in the same directory
-    or set the GOOGLE_APPLICATION_CREDENTIALS environment variable.
-    """
-    try:
-        # If already initialized, return the app
-        return firebase_admin.get_app()
-    except ValueError:
-        # Initialize with service account
-        cred_path = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH', 'service-account.json')
-        if os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
-            return firebase_admin.initialize_app(cred, {
-                'projectId': os.getenv('FIREBASE_PROJECT_ID')
-            })
-        else:
-            logger.warning("Firebase service account not found. Running in local-only mode.")
-            return None
+# Initialize Supabase
+supabase_url = os.getenv("SUPABASE_URL", "https://uraaixhgpqpqffckocjky.supabase.co")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase: Client | None = (
+    create_client(supabase_url, supabase_key) if supabase_key else None
+)
 
-def sync_fund(db, symbol, data):
-    if not db or not data:
+
+def sync_fund(symbol: str, data: list):
+    """Sync fund data to Supabase fund_prices table."""
+    if not supabase or not data:
+        logger.warning(f"Supabase not configured or no data for {symbol}")
         return
-    
+
     try:
         # Get the latest price (usually the first item in the result)
         latest = data[0]
-        price = float(latest.get('FIYAT', 0))
-        date_str = latest.get('TARIH') # e.g. "12.04.2026"
-        
-        if price > 0:
-            doc_ref = db.collection('fund_prices').document(symbol.upper())
-            doc_ref.set({
-                'price': price,
-                'updatedAt': firestore.SERVER_TIMESTAMP,
-                'source': 'tefas-crawler-python',
-                'lastDate': date_str
-            }, merge=True)
-            logger.info(f"Synced {symbol} to Firestore: {price}")
-    except Exception as e:
-        logger.error(f"Error syncing {symbol} to Firestore: {e}")
+        price = float(latest.get("FIYAT", 0))
+        date_str = latest.get("TARIH")  # e.g. "12.04.2026"
+        name = latest.get("FON ADI", symbol.upper())
 
-def main():
-    app = initialize_firebase()
-    db = firestore.client() if app else None
-    
+        if price > 0:
+            result = (
+                supabase.table("fund_prices")
+                .upsert(
+                    {
+                        "symbol": symbol.upper(),
+                        "price": price,
+                        "name": name,
+                        "date": date_str,
+                        "source": "tefas-crawler-python",
+                        "updated_at": datetime.now().isoformat(),
+                    },
+                    on_conflict="symbol",
+                )
+                .execute()
+            )
+
+            logger.info(f"Synced {symbol} to Supabase: {price}")
+    except Exception as e:
+        logger.error(f"Error syncing {symbol} to Supabase: {e}")
+
+
+def sync_all_funds(fund_list: list[str]):
+    """Sync multiple funds."""
     crawler = TefasCrawler()
-    
-    # Example funds to sync
-    funds_to_sync = ['AVR', 'AEI', 'NHN', 'IPV', 'TDF']
-    
-    for symbol in funds_to_sync:
+
+    for symbol in fund_list:
         logger.info(f"Processing {symbol}...")
         data = crawler.fetch(symbol)
         if data:
-            sync_fund(db, symbol, data)
-        
+            sync_fund(symbol, data)
+
         # Delay between different funds to be polite
+        import time
+        import random
+
         time.sleep(random.randint(3, 7))
+
+
+def main():
+    if not supabase:
+        logger.error("SUPABASE_SERVICE_ROLE_KEY not set. Exiting.")
+        return
+
+    # Example funds to sync
+    funds_to_sync = ["AVR", "AEI", "NHN", "IPV", "TDF", "KLU", "GZT", "KPC"]
+
+    logger.info(f"Starting TEFAS sync for {len(funds_to_sync)} funds...")
+    sync_all_funds(funds_to_sync)
+    logger.info("TEFAS sync completed.")
+
 
 if __name__ == "__main__":
     main()
